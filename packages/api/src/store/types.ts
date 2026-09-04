@@ -30,6 +30,11 @@ export type AuditRecord = {
   actorUserId: string | null;
 };
 
+export type AuditListScope = {
+  actorUserId: string;
+  workspaceId: string;
+};
+
 export type WorkRecord = {
   kind: string;
   key: string;
@@ -196,7 +201,7 @@ export type GabotStore = {
     targetId?: string;
     payload: Record<string, unknown>;
   }): Promise<void>;
-  listAudit(limit: number): Promise<AuditRecord[]>;
+  listAudit(limit: number, scope?: AuditListScope): Promise<AuditRecord[]>;
   hasGrant(agentId: string, kind: string, ref: string): Promise<boolean>;
   listGrants(): Promise<GrantRecord[]>;
   listPluginTools(serverId: string): Promise<PluginTool[]>;

@@ -246,7 +246,7 @@ async function runCreateRoutine(
   }
   const cron = stringArg(input.args.cron) || '0 * * * *';
   const timezone = stringArg(input.args.timezone) || 'UTC';
-  const channelId = stringArg(input.args.channelId) || input.channelId;
+  const channelId = input.channelId;
   if (!channelId) {
     return {
       ok: false,

@@ -52,4 +52,17 @@ describe('jobs', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/internal/runs/execute');
     vi.unstubAllGlobals();
   });
+
+  it('fails a run execute when the control plane returns an error status', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ error: 'run missing' }),
+      ok: false,
+      status: 400,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      deliverRun({ key: 'run-1', payload: { runId: 'run-1' } }, 'http://api:3001', 'secret'),
+    ).rejects.toThrow('run missing');
+    vi.unstubAllGlobals();
+  });
 });

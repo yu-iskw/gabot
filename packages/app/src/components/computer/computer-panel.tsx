@@ -9,20 +9,18 @@ import { ToolLine } from '../channels/tool-line.js';
 
 import { ComputerView, useExpandedScreen } from './computer-view.js';
 
-const BOT = 'general-assistant';
-
 type AuditEvent = { eventType: string; payload: unknown };
 
-export function ComputerPanel({ name }: { name: string }) {
+export function ComputerPanel({ botId, name }: { botId: string; name: string }) {
   const { token } = useAuth();
   const screen = useExpandedScreen();
   const shot = useQuery({
-    queryKey: ['screenshot', BOT],
+    queryKey: ['screenshot', botId],
     refetchInterval: 1000,
     refetchOnWindowFocus: false,
     staleTime: 0,
     queryFn: async () => {
-      const body: unknown = await apiJson(`/api/computers/${BOT}/screenshot`, await token());
+      const body: unknown = await apiJson(`/api/computers/${botId}/screenshot`, await token());
       return readScreenShot(body);
     },
   });

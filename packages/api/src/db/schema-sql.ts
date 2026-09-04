@@ -325,6 +325,14 @@ CREATE TABLE IF NOT EXISTS delegations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS delegations_parent_idx ON delegations (parent_run_id);
+
+UPDATE routines
+SET channel_id = 'ch-' || owner_user_id || '-general'
+WHERE channel_id = 'general';
+
+DELETE FROM channel_participants WHERE channel_id = 'general';
+DELETE FROM channel_memberships WHERE channel_id = 'general';
+DELETE FROM channel_agents WHERE channel_id = 'general';
 `;
 
 export const SEED_SQL = `

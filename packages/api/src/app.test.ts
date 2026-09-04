@@ -160,6 +160,7 @@ describe('control plane', () => {
     expect(schema.organizationMembers).toBeDefined();
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS runs');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS organization_members');
+    expect(SCHEMA_SQL).toContain("WHERE channel_id = 'general'");
     expect(DEFAULT_ALLOW_POLICY.allow).toEqual(['true']);
   });
 
@@ -208,6 +209,23 @@ describe('control plane', () => {
     });
     expect(handoff.status).toBe(200);
     expect((await app.request('/api/internal/handoff', { method: 'POST' })).status).toBe(401);
+    const stolenRoutine = await app.request('/api/internal/routines/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': 'worker' },
+      body: JSON.stringify({
+        channelId: personalChannelId('user-2'),
+        instruction: 'ping',
+        ownerUserId: person.id,
+        agentId: 'general-assistant',
+      }),
+    });
+    expect(stolenRoutine.status).toBe(404);
+    const outsiderTurn = await app.request(`/api/channels/${channelId}/turns`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ message: 'hi', botId: 'stranger' }),
+    });
+    expect(outsiderTurn.status).toBe(400);
   });
 
   it('renders a granted component and enqueues a handoff', async () => {
@@ -536,6 +554,108 @@ describe('control plane', () => {
       body: JSON.stringify({ runId }),
     });
     expect(internal.status).toBe(200);
+  });
+
+  it('rejects a root turn for a bot that is not on the channel', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    await expect(
+      executeTurn({
+        store,
+        sandbox: sandbox([]),
+        agent: createScriptedAgentRunner(),
+        mcpUrl: 'http://mcp.test',
+        user: { ...person, isAdmin: true },
+        channelId: defaultChannel,
+        botId: 'stranger',
+        message: 'hello',
+      }),
+    ).rejects.toThrow('not a participant');
+    expect(await store.listMessages(defaultChannel)).toHaveLength(0);
+  });
+
+  it('does not re-enter a running run', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    const workspace = await store.getWorkspaceForUser(person.id);
+    const run = await store.createRun({
+      workspaceId: workspace?.id ?? '',
+      projectId: workspace?.projectId ?? '',
+      channelId: defaultChannel,
+      botId: 'coder',
+      ownerUserId: person.id,
+      triggerType: 'delegation',
+      status: 'running',
+      objective: 'already in flight',
+      authority: rootAuthority(['delegate_to_bot']),
+      depth: 1,
+    });
+    const before = await store.listMessages(defaultChannel);
+    const result = await executeRun({
+      store,
+      sandbox: sandbox([]),
+      agent: createScriptedAgentRunner(),
+      mcpUrl: 'http://mcp.test',
+      user: { ...person, isAdmin: true },
+      runId: run.id,
+    });
+    expect(result.text).toBe('');
+    expect((await store.getRun(run.id))?.status).toBe('running');
+    expect(await store.listMessages(defaultChannel)).toHaveLength(before.length);
+  });
+
+  it('schedules routines on the run channel even when args include another channelId', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    const other = { id: 'user-2', email: 'other@example.com', name: 'Other' };
+    await store.upsertUser(other, []);
+    const workspace = await store.getWorkspaceForUser(person.id);
+    const run = await store.createRun({
+      workspaceId: workspace?.id ?? '',
+      projectId: workspace?.projectId ?? '',
+      channelId: defaultChannel,
+      botId: 'general-assistant',
+      ownerUserId: person.id,
+      triggerType: 'interactive',
+      status: 'running',
+      objective: 'schedule',
+      authority: rootAuthority(['create_routine']),
+      depth: 0,
+    });
+    const result = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: 'create_routine',
+      args: {
+        instruction: 'say hello',
+        cron: '* * * * *',
+        channelId: personalChannelId(other.id),
+      },
+      channelId: defaultChannel,
+      run,
+    });
+    expect(result.ok).toBe(true);
+    const mine = await store.listRoutinesFor(person.id);
+    expect(mine[0]?.channelId).toBe(defaultChannel);
+    expect(await store.listRoutinesFor(other.id)).toHaveLength(0);
+  });
+
+  it('hides another workspace audit trail from the current user', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    expect((await app.request('/api/me', { headers })).status).toBe(200);
+    await store.insertAudit({
+      actorUserId: 'user-2',
+      eventType: 'computer.navigate',
+      targetType: 'computer',
+      payload: { workspaceId: 'ws-user-2', url: 'https://secret.example' },
+    });
+    const trail = await app.request('/api/admin/audit-events?limit=25', { headers });
+    expect(JSON.stringify(await trail.json())).not.toContain('secret.example');
   });
 
   it('denies a child tool that is outside the parent envelope', async () => {

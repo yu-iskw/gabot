@@ -54,5 +54,10 @@ function firstGroup(content: string, pattern: RegExp): string | undefined {
 }
 
 function isRefused(lower: string): boolean {
-  return lower.includes('refus') || lower.includes('not granted') || lower.includes('policy');
+  return (
+    lower.includes('refus') ||
+    lower.includes('not granted') ||
+    lower.includes('not authorized') ||
+    lower.includes('policy')
+  );
 }

@@ -33,4 +33,10 @@ describe('captionForTool', () => {
     expect(caption.refused).toBe(true);
     expect(caption.label).toBe('Called MCP');
   });
+
+  it('marks an envelope denial as blocked', () => {
+    expect(captionForTool('Run abc is not authorized to invoke computer_navigate.').refused).toBe(
+      true,
+    );
+  });
 });

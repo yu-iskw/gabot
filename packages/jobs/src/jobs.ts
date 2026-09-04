@@ -113,11 +113,15 @@ export async function deliverRun(
   secret: string,
 ): Promise<void> {
   const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
-  await fetch(`${apiUrl.replace(/\/$/, '')}/api/internal/runs/execute`, {
+  const response = await fetch(`${apiUrl.replace(/\/$/, '')}/api/internal/runs/execute`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': secret },
     body: JSON.stringify({ runId }),
   });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error ?? `run execute HTTP ${String(response.status)}`);
+  }
 }
 
 export async function runTick(input: {

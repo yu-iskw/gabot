@@ -11,11 +11,13 @@ import {
 } from '@gabot/common';
 import postgres from 'postgres';
 
+import { parseEnvelope, toRunRecord, type DbRun } from './postgres-run-map.js';
 import { PROTECTED_AGENT_ID } from './types.js';
 
 import type {
   AgentPatch,
   AgentProfile,
+  AuditListScope,
   AuditRecord,
   ChannelEventRecord,
   ChannelParticipant,
@@ -181,11 +183,25 @@ export class PostgresStore implements GabotStore {
     `;
   }
 
-  public async listAudit(limit: number): Promise<AuditRecord[]> {
+  public async listAudit(limit: number, scope?: AuditListScope): Promise<AuditRecord[]> {
+    if (!scope) {
+      return this.sql<AuditRecord[]>`
+        SELECT event_type AS "eventType", target_type AS "targetType", target_id AS "targetId",
+               payload, created_at AS "createdAt", actor_user_id AS "actorUserId"
+        FROM audit_events
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${limit}
+      `;
+    }
     return this.sql<AuditRecord[]>`
       SELECT event_type AS "eventType", target_type AS "targetType", target_id AS "targetId",
              payload, created_at AS "createdAt", actor_user_id AS "actorUserId"
       FROM audit_events
+      WHERE payload->>'workspaceId' = ${scope.workspaceId}
+         OR (
+           actor_user_id = ${scope.actorUserId}
+           AND COALESCE(payload->>'workspaceId', '') = ''
+         )
       ORDER BY created_at DESC, id DESC
       LIMIT ${limit}
     `;
@@ -922,12 +938,6 @@ export class PostgresStore implements GabotStore {
     const workspaceId = personalWorkspaceId(user.id);
     const projectId = personalProjectId(user.id);
     const channelId = personalChannelId(user.id);
-    const existing = await this.sql<{ id: string }[]>`
-      SELECT id FROM workspaces WHERE id = ${workspaceId}
-    `;
-    if (existing.length > 0) {
-      return;
-    }
     await this.sql`
       INSERT INTO organizations (id, name) VALUES (${PLATFORM_ORG_ID}, 'gabot')
       ON CONFLICT (id) DO NOTHING
@@ -953,7 +963,18 @@ export class PostgresStore implements GabotStore {
       VALUES (${channelId}, ${DEFAULT_CHANNEL_NAME}, 'Default coworker channel', ${projectId})
       ON CONFLICT (id) DO NOTHING
     `;
+    await this.retireSharedGeneral(user.id);
     await this.attachChannelParties(channelId, user.id);
+  }
+
+  private async retireSharedGeneral(userId: string): Promise<void> {
+    await this.sql`
+      DELETE FROM channel_memberships WHERE channel_id = 'general' AND user_id = ${userId}
+    `;
+    await this.sql`
+      DELETE FROM channel_participants
+      WHERE channel_id = 'general' AND principal_type = 'user' AND principal_id = ${userId}
+    `;
   }
 
   private async attachChannelParties(
@@ -965,75 +986,6 @@ export class PostgresStore implements GabotStore {
       await this.addChannelParticipant(party);
     }
   }
-}
-
-type DbRun = {
-  authority: AuthorityEnvelope | string;
-  bot_id: string;
-  channel_id: string;
-  depth: number;
-  error: string | null;
-  finished_at: Date | null;
-  id: string;
-  objective: string;
-  owner_user_id: string;
-  parent_run_id: string | null;
-  project_id: string;
-  root_run_id: string;
-  started_at: Date | null;
-  status: string;
-  trigger_type: string;
-  workspace_id: string;
-};
-
-function parseEnvelope(value: AuthorityEnvelope | string): AuthorityEnvelope {
-  if (typeof value === 'string') {
-    const parsed: unknown = JSON.parse(value);
-    if (typeof parsed === 'object' && parsed !== null && 'allowedTools' in parsed) {
-      const tools = (parsed as { allowedTools?: unknown }).allowedTools;
-      return {
-        allowedTools: Array.isArray(tools) ? tools.filter((item) => typeof item === 'string') : [],
-      };
-    }
-    return { allowedTools: [] };
-  }
-  return cloneAuthority(value);
-}
-
-function toRunStatus(value: string): RunStatus {
-  switch (value) {
-    case 'queued':
-    case 'running':
-    case 'succeeded':
-    case 'failed':
-    case 'cancelled': {
-      return value;
-    }
-    default: {
-      return 'failed';
-    }
-  }
-}
-
-function toRunRecord(row: DbRun): RunRecord {
-  return {
-    id: row.id,
-    workspaceId: row.workspace_id,
-    projectId: row.project_id,
-    channelId: row.channel_id,
-    parentRunId: row.parent_run_id,
-    rootRunId: row.root_run_id,
-    botId: row.bot_id,
-    ownerUserId: row.owner_user_id,
-    triggerType: row.trigger_type,
-    status: toRunStatus(row.status),
-    objective: row.objective,
-    authority: parseEnvelope(row.authority),
-    depth: Number(row.depth),
-    startedAt: row.started_at,
-    finishedAt: row.finished_at,
-    error: row.error,
-  };
 }
 
 export function createSql(url: string): Sql {

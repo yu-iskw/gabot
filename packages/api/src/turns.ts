@@ -75,28 +75,37 @@ const OFFERED_TOOLS = TURN_TOOLS.map((tool) => ({
   parameters: { ...tool.parameters },
 }));
 
+export function isTurnClientError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('is not a participant') || message.includes('not in a workspace');
+}
+
 export async function executeTurn(input: TurnInput): Promise<TurnResult> {
   const botId = input.botId ?? mentionedBotId(input.message) ?? PROTECTED_AGENT_ID;
-  await input.store.appendMessage({
-    channelId: input.channelId,
-    role: 'user',
-    content: input.message,
-  });
   const scope = await input.store.getChannelScope(input.channelId);
   if (!scope) {
     throw new Error(`Channel ${input.channelId} is not in a workspace project.`);
+  }
+  const participating = await input.store.isChannelParticipant(input.channelId, 'bot', botId);
+  if (!participating) {
+    throw new Error(`Bot ${botId} is not a participant on channel ${input.channelId}.`);
   }
   const run = await input.store.createRun({
     workspaceId: scope.workspaceId,
     projectId: scope.projectId,
     channelId: input.channelId,
     botId,
-    ownerUserId: input.user.id,
+    ownerUserId: scope.ownerUserId,
     triggerType: 'interactive',
-    status: 'running',
+    status: 'queued',
     objective: input.message,
     authority: rootAuthority(TURN_TOOL_NAMES),
     depth: 0,
+  });
+  await input.store.appendMessage({
+    channelId: input.channelId,
+    role: 'user',
+    content: input.message,
   });
   await recordRunEvent(input.store, {
     run,
@@ -134,7 +143,7 @@ export async function executeRun(input: {
   if (!run) {
     throw new Error(`Run ${input.runId} not found.`);
   }
-  if (run.status === 'succeeded' || run.status === 'cancelled') {
+  if (run.status === 'succeeded' || run.status === 'cancelled' || run.status === 'running') {
     return { runId: run.id, text: '', toolNames: [] };
   }
   await input.store.updateRunStatus(run.id, 'running');

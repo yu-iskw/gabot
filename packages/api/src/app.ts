@@ -12,7 +12,7 @@ import { requireUser } from './auth.js';
 import { runGatewayAction } from './gateway.js';
 import { getPluginDetail, listPluginViews } from './plugin-views.js';
 import { PROTECTED_AGENT_ID, type GabotStore, type SessionUser } from './store/types.js';
-import { executeRun, executeTurn } from './turns.js';
+import { executeRun, executeTurn, isTurnClientError } from './turns.js';
 
 import type { AuthVariables } from './auth.js';
 import type { AgentRunner } from './turns.js';
@@ -121,23 +121,33 @@ function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options:
       return context.json({ error: NOT_FOUND }, 404);
     }
     const body = asRecord(await context.req.json());
-    const result = await executeTurn({
-      store: options.store,
-      sandbox: options.sandbox,
-      agent: options.agent,
-      mcpUrl: options.mcpUrl,
-      user,
-      channelId,
-      message: asString(body.message),
-      botId: asString(body.botId) || undefined,
-    });
-    const payload = `data: ${JSON.stringify({ type: 'text', delta: result.text, toolNames: result.toolNames })}\n\ndata: ${JSON.stringify({ type: 'done' })}\n\n`;
-    return context.body(payload, 200, { 'content-type': 'text/event-stream' });
+    try {
+      const result = await executeTurn({
+        store: options.store,
+        sandbox: options.sandbox,
+        agent: options.agent,
+        mcpUrl: options.mcpUrl,
+        user,
+        channelId,
+        message: asString(body.message),
+        botId: asString(body.botId) || undefined,
+      });
+      const payload = `data: ${JSON.stringify({ type: 'text', delta: result.text, toolNames: result.toolNames })}\n\ndata: ${JSON.stringify({ type: 'done' })}\n\n`;
+      return context.body(payload, 200, { 'content-type': 'text/event-stream' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return context.json({ error: message }, isTurnClientError(error) ? 400 : 500);
+    }
   });
   app.get('/api/admin/audit-events', async (context) => {
+    const user = context.get('user');
+    const workspace = await options.store.getWorkspaceForUser(user.id);
     const limit = Number(context.req.query('limit') ?? '25');
     return context.json({
-      events: await options.store.listAudit(Number.isFinite(limit) ? limit : 25),
+      events: await options.store.listAudit(Number.isFinite(limit) ? limit : 25, {
+        actorUserId: user.id,
+        workspaceId: workspace?.id ?? '',
+      }),
     });
   });
 }
@@ -450,13 +460,17 @@ function registerInternalRoutes(
     if (!channelId || !instruction || !owner) {
       return context.json({ error: INVALID_BODY }, 400);
     }
+    const channel = await options.store.getChannel(channelId, owner.id);
+    if (!channel) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
     const result = await executeTurn({
       store: options.store,
       sandbox: options.sandbox,
       agent: options.agent,
       mcpUrl: options.mcpUrl,
       user: owner,
-      channelId,
+      channelId: channel.id,
       message: instruction,
       botId: agentId,
     });

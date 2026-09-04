@@ -43,6 +43,7 @@ export function ChannelPage({
   const channelName = channels.data?.find((row) => row.id === channelId)?.name ?? 'Channel';
   const messages = useQuery({
     queryKey: ['messages', channelId],
+    refetchInterval: 2000,
     queryFn: async () => {
       const body = await apiJson<{
         messages: Array<{ agentId: string | null; content: string; id: string; role: string }>;
@@ -61,6 +62,7 @@ export function ChannelPage({
   });
   const events = useQuery({
     queryKey: ['events', channelId],
+    refetchInterval: 2000,
     queryFn: async () => {
       const body = await apiJson<{
         events: Array<{ id: string; payload: Record<string, unknown>; type: string }>;
@@ -87,7 +89,7 @@ export function ChannelPage({
   return (
     <DetailPanel
       open={pane !== null}
-      detail={paneDetail(pane, channelName)}
+      detail={paneDetail(pane, channelName, watchBotId(messages.data ?? []))}
       onClose={() => onPane(null)}
     >
       <ChannelHeader name={channelName} pane={pane} onPane={onPane} />
@@ -115,13 +117,20 @@ export function ChannelPage({
   );
 }
 
-function paneDetail(pane: ChannelPane | null, channelName: string) {
+function watchBotId(messages: Array<{ agentId: string | null; role: string }>): string {
+  const last = [...messages]
+    .reverse()
+    .find((message) => message.role === 'assistant' && message.agentId);
+  return last?.agentId ?? DEFAULT_BOT;
+}
+
+function paneDetail(pane: ChannelPane | null, channelName: string, botId: string) {
   switch (pane) {
     case 'settings': {
-      return <AgentProfile agentId={DEFAULT_BOT} />;
+      return <AgentProfile agentId={botId} />;
     }
     case 'watch': {
-      return <ComputerPanel name={channelName} />;
+      return <ComputerPanel botId={botId} name={channelName} />;
     }
     case null: {
       return null;

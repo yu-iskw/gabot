@@ -18,6 +18,7 @@ import { PROTECTED_AGENT_ID } from './types.js';
 import type {
   AgentPatch,
   AgentProfile,
+  AuditListScope,
   AuditRecord,
   ChannelEventRecord,
   ChannelParticipant,
@@ -204,8 +205,9 @@ export class MemoryStore implements GabotStore {
     });
   }
 
-  public async listAudit(limit: number): Promise<AuditRecord[]> {
-    return this.audits.slice(0, limit);
+  public async listAudit(limit: number, scope?: AuditListScope): Promise<AuditRecord[]> {
+    const rows = scope ? this.audits.filter((row) => auditInScope(row, scope)) : this.audits;
+    return rows.slice(0, limit);
   }
 
   public async hasGrant(agentId: string, kind: string, ref: string): Promise<boolean> {
@@ -779,4 +781,12 @@ function toChannelRecord(channel: ChannelRow): ChannelRecord {
 
 function cloneRun(row: RunRecord): RunRecord {
   return { ...row, authority: cloneAuthority(row.authority) };
+}
+
+function auditInScope(row: AuditRecord, scope: AuditListScope): boolean {
+  const workspaceId = typeof row.payload.workspaceId === 'string' ? row.payload.workspaceId : '';
+  if (workspaceId === scope.workspaceId) {
+    return true;
+  }
+  return row.actorUserId === scope.actorUserId && workspaceId === '';
 }
