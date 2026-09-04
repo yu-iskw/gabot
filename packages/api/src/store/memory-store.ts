@@ -514,41 +514,6 @@ export class MemoryStore implements GabotStore {
     return [...this.runs.values()].filter((row) => row.channelId === channelId).map(cloneRun);
   }
 
-  private async countRunsForRoot(rootRunId: string): Promise<number> {
-    return [...this.runs.values()].filter((row) => row.rootRunId === rootRunId).length;
-  }
-
-  private async countChildRuns(parentRunId: string): Promise<number> {
-    return [...this.runs.values()].filter((row) => row.parentRunId === parentRunId).length;
-  }
-
-  private async createDelegation(input: {
-    authorityEnvelope: AuthorityEnvelope;
-    childRunId: string;
-    fromBotId: string;
-    objective: string;
-    parentRunId: string;
-    requestedCapabilities: string[];
-    toBotId: string;
-  }): Promise<DelegationRecord> {
-    const record: DelegationRecord = {
-      id: randomUUID(),
-      parentRunId: input.parentRunId,
-      childRunId: input.childRunId,
-      fromBotId: input.fromBotId,
-      toBotId: input.toBotId,
-      objective: input.objective,
-      requestedCapabilities: [...input.requestedCapabilities],
-      authorityEnvelope: cloneAuthority(input.authorityEnvelope),
-    };
-    this.delegations.push(record);
-    return {
-      ...record,
-      requestedCapabilities: [...record.requestedCapabilities],
-      authorityEnvelope: cloneAuthority(record.authorityEnvelope),
-    };
-  }
-
   public async createDelegatedChild(input: DelegatedChildInput): Promise<RunRecord> {
     const parent = input.parent;
     const budget = assertDelegationBudget({
@@ -742,6 +707,41 @@ export class MemoryStore implements GabotStore {
 
   public addRoutine(routine: RoutineRow): void {
     this.routines.push(routine);
+  }
+
+  private async countRunsForRoot(rootRunId: string): Promise<number> {
+    return [...this.runs.values()].filter((row) => row.rootRunId === rootRunId).length;
+  }
+
+  private async countChildRuns(parentRunId: string): Promise<number> {
+    return [...this.runs.values()].filter((row) => row.parentRunId === parentRunId).length;
+  }
+
+  private async createDelegation(input: {
+    authorityEnvelope: AuthorityEnvelope;
+    childRunId: string;
+    fromBotId: string;
+    objective: string;
+    parentRunId: string;
+    requestedCapabilities: string[];
+    toBotId: string;
+  }): Promise<DelegationRecord> {
+    const record: DelegationRecord = {
+      id: randomUUID(),
+      parentRunId: input.parentRunId,
+      childRunId: input.childRunId,
+      fromBotId: input.fromBotId,
+      toBotId: input.toBotId,
+      objective: input.objective,
+      requestedCapabilities: [...input.requestedCapabilities],
+      authorityEnvelope: cloneAuthority(input.authorityEnvelope),
+    };
+    this.delegations.push(record);
+    return {
+      ...record,
+      requestedCapabilities: [...record.requestedCapabilities],
+      authorityEnvelope: cloneAuthority(record.authorityEnvelope),
+    };
   }
 
   private ensurePersonalWorkspace(user: SessionUser): void {
