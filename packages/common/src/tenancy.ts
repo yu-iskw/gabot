@@ -71,6 +71,18 @@ export function botIdentityContent(botId: string): string {
   return `You are ${botId}.`;
 }
 
+export function parseBotIdentityContent(content: string): string | undefined {
+  const sample = botIdentityContent('\0');
+  const marker = sample.indexOf('\0');
+  const prefix = sample.slice(0, marker);
+  const suffix = sample.slice(marker + 1);
+  if (!content.startsWith(prefix) || !content.endsWith(suffix)) {
+    return undefined;
+  }
+  const id = content.slice(prefix.length, content.length - suffix.length).trim();
+  return id.length > 0 ? id : undefined;
+}
+
 export function defaultChannelParticipants(
   channelId: string,
   userId: string,

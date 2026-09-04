@@ -497,6 +497,7 @@ function registerInternalRoutes(
       mcpUrl: options.mcpUrl,
       user: owner,
       runId,
+      run,
     });
     return context.json({ ok: true, text: result.text, runId: result.runId });
   });

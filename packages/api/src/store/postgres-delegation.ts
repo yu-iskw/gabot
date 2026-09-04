@@ -18,12 +18,22 @@ export async function insertDelegatedChild(
 
 async function writeDelegatedChild(sql: TxSql, input: DelegatedChildInput): Promise<RunRecord> {
   const parent = input.parent;
-  const childCount = await countWhere(sql, 'parent_run_id', parent.id);
-  const rootRunCount = await countWhere(sql, 'root_run_id', parent.rootRunId);
+  const locked = await sql<{ id: string }[]>`
+    SELECT id FROM runs WHERE id = ${parent.id} FOR UPDATE
+  `;
+  if (locked.at(0) === undefined) {
+    throw new Error(`Run ${parent.id} not found.`);
+  }
+  const counts = await sql<{ child_count: string; root_count: string }[]>`
+    SELECT
+      count(*) FILTER (WHERE parent_run_id = ${parent.id})::text AS child_count,
+      count(*) FILTER (WHERE root_run_id = ${parent.rootRunId})::text AS root_count
+    FROM runs
+  `;
   const budget = assertDelegationBudget({
     depth: parent.depth,
-    childCount,
-    rootRunCount,
+    childCount: Number.parseInt(counts.at(0)?.child_count ?? '0', 10),
+    rootRunCount: Number.parseInt(counts.at(0)?.root_count ?? '0', 10),
   });
   if (!budget.ok) {
     throw new DelegationBudgetError(budget.reason);
@@ -35,7 +45,7 @@ async function writeDelegatedChild(sql: TxSql, input: DelegatedChildInput): Prom
       bot_id, owner_user_id, trigger_type, status, objective, authority, depth, started_at
     )
     VALUES (
-      ${childId}, ${parent.workspaceId}, ${parent.projectId}, ${input.channelId},
+      ${childId}, ${parent.workspaceId}, ${parent.projectId}, ${parent.channelId},
       ${parent.id}, ${parent.rootRunId}, ${input.toBotId}, ${parent.ownerUserId},
       ${'delegation'}, ${'queued'}, ${input.objective},
       ${JSON.stringify(input.authority)}::jsonb, ${parent.depth + 1}, ${null}
@@ -56,8 +66,8 @@ async function writeDelegatedChild(sql: TxSql, input: DelegatedChildInput): Prom
       requested_capabilities, authority_envelope
     )
     VALUES (
-      ${delegationId}, ${parent.id}, ${childId}, ${input.fromBotId}, ${input.toBotId},
-      ${input.objective}, ${input.requestedCapabilities},
+      ${delegationId}, ${parent.id}, ${childId}, ${parent.botId}, ${input.toBotId},
+      ${input.objective}, ${JSON.stringify(input.requestedCapabilities)}::jsonb,
       ${JSON.stringify(input.authority)}::jsonb
     )
   `;
@@ -73,8 +83,8 @@ async function writeDelegatedChild(sql: TxSql, input: DelegatedChildInput): Prom
   await sql`
     INSERT INTO channel_events (id, channel_id, run_id, type, actor_type, actor_id, payload)
     VALUES (
-      ${eventId}, ${input.channelId}, ${childId}, ${'agent.delegation.requested'},
-      ${'bot'}, ${input.fromBotId},
+      ${eventId}, ${parent.channelId}, ${childId}, ${'agent.delegation.requested'},
+      ${'bot'}, ${parent.botId},
       ${JSON.stringify({
         toBotId: input.toBotId,
         objective: input.objective,
@@ -83,20 +93,4 @@ async function writeDelegatedChild(sql: TxSql, input: DelegatedChildInput): Prom
     )
   `;
   return toRunRecord(row);
-}
-
-async function countWhere(
-  sql: TxSql,
-  column: 'parent_run_id' | 'root_run_id',
-  value: string,
-): Promise<number> {
-  const rows =
-    column === 'parent_run_id'
-      ? await sql<{ n: string }[]>`
-          SELECT count(*)::text AS n FROM runs WHERE parent_run_id = ${value}
-        `
-      : await sql<{ n: string }[]>`
-          SELECT count(*)::text AS n FROM runs WHERE root_run_id = ${value}
-        `;
-  return Number.parseInt(rows.at(0)?.n ?? '0', 10);
 }

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createJobsApp, deliverHandoff, deliverRoutine, deliverRun } from './jobs.js';
+import {
+  createJobsApp,
+  deliverHandoff,
+  deliverRoutine,
+  deliverRun,
+  runExecuteFailureDisposition,
+} from './jobs.js';
 
 describe('jobs', () => {
   it('exposes health and tick', async () => {
@@ -64,5 +70,19 @@ describe('jobs', () => {
       deliverRun({ key: 'run-1', payload: { runId: 'run-1' } }, 'http://api:3001', 'secret'),
     ).rejects.toThrow('run missing');
     vi.unstubAllGlobals();
+  });
+});
+
+describe('runExecuteFailureDisposition', () => {
+  it('retries queued and running hops after a delivery failure', () => {
+    expect(runExecuteFailureDisposition('queued')).toBe('unclaim');
+    expect(runExecuteFailureDisposition('running')).toBe('unclaim');
+  });
+
+  it('finishes terminal or missing runs so unique work keys do not loop', () => {
+    expect(runExecuteFailureDisposition('failed')).toBe('finish');
+    expect(runExecuteFailureDisposition('succeeded')).toBe('finish');
+    expect(runExecuteFailureDisposition('cancelled')).toBe('finish');
+    expect(runExecuteFailureDisposition(undefined)).toBe('finish');
   });
 });

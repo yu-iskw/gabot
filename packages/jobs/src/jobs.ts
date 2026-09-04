@@ -38,6 +38,21 @@ async function finishWork(sql: JobSql, kind: string, key: string, error?: string
   `;
 }
 
+async function unclaimWork(sql: JobSql, kind: string, key: string, error: string): Promise<void> {
+  await sql`
+    UPDATE work_items
+    SET claimed_by = NULL, lease_until = NULL, last_error = ${error}, updated_at = now()
+    WHERE kind = ${kind} AND key = ${key} AND finished_at IS NULL
+  `;
+}
+
+export function runExecuteFailureDisposition(status: string | undefined): 'finish' | 'unclaim' {
+  if (status === 'queued' || status === 'running') {
+    return 'unclaim';
+  }
+  return 'finish';
+}
+
 async function enqueueDueRoutines(sql: JobSql, now = new Date()): Promise<number> {
   const routines = await sql<
     {
@@ -171,6 +186,16 @@ async function handleItem(
     await finishWork(input.sql, item.kind, item.key);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'job failed';
+    if (item.kind === 'run.execute') {
+      const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
+      const rows = await input.sql<{ status: string }[]>`
+        SELECT status FROM runs WHERE id = ${runId}
+      `;
+      if (runExecuteFailureDisposition(rows.at(0)?.status) === 'unclaim') {
+        await unclaimWork(input.sql, item.kind, item.key, message);
+        return;
+      }
+    }
     await finishWork(input.sql, item.kind, item.key, message);
   }
 }

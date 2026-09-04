@@ -137,22 +137,24 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
     mcpUrl: input.mcpUrl,
     user: input.user,
     runId: run.id,
+    run,
   });
 }
 
 export async function executeRun(input: {
   agent: AgentRunner;
   mcpUrl: string;
+  run?: RunRecord;
   runId: string;
   sandbox: SandboxPort;
   store: GabotStore;
   user: SessionUser;
 }): Promise<TurnResult> {
-  const run = await input.store.getRun(input.runId);
+  const run = input.run ?? (await input.store.getRun(input.runId));
   if (!run) {
     throw new Error(`Run ${input.runId} not found.`);
   }
-  if (run.status === 'succeeded' || run.status === 'cancelled') {
+  if (run.status === 'succeeded' || run.status === 'cancelled' || run.status === 'failed') {
     return { runId: run.id, text: '', toolNames: [] };
   }
   await input.store.updateRunStatus(run.id, 'running');
@@ -182,10 +184,13 @@ async function completeRun(
   },
   run: RunRecord,
 ): Promise<TurnResult> {
-  const threadId = await input.store.mintThread(run.ownerUserId, run.channelId);
+  const [threadId, seeded] = await Promise.all([
+    input.store.mintThread(run.ownerUserId, run.channelId),
+    messagesForRun(input.store, run),
+  ]);
   const toolNames: string[] = [];
   let text = '';
-  let current = await messagesForRun(input.store, run);
+  let current = seeded;
   for (let step = 0; step < 4; step += 1) {
     const events = await input.agent.run({
       threadId,

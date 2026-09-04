@@ -1,4 +1,5 @@
 import {
+  asString,
   DEFAULT_ALLOW_POLICY,
   matchesToken,
   personalChannelId,
@@ -540,10 +541,7 @@ describe('control plane', () => {
     const later = new Date(Date.now() + 6 * 60_000);
     const reclaimed = await store.claimWork('alive', 10, later);
     expect(reclaimed).toHaveLength(1);
-    const runId =
-      typeof reclaimed[0]?.payload.runId === 'string'
-        ? reclaimed[0].payload.runId
-        : (reclaimed[0]?.key ?? '');
+    const runId = asString(reclaimed[0]?.payload.runId, reclaimed[0]?.key ?? '');
     const child = await executeRun({ ...deps, runId });
     expect(child.runId).toBe(runId);
     const run = await store.getRun(runId);
@@ -601,6 +599,34 @@ describe('control plane', () => {
     });
     expect(result.text).toBeDefined();
     expect((await store.getRun(run.id))?.status).toBe('succeeded');
+  });
+
+  it('does not rerun a failed hop', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    const workspace = await store.getWorkspaceForUser(person.id);
+    const run = await store.createRun({
+      workspaceId: workspace?.id ?? '',
+      projectId: workspace?.projectId ?? '',
+      channelId: defaultChannel,
+      botId: 'coder',
+      ownerUserId: person.id,
+      triggerType: 'delegation',
+      status: 'failed',
+      objective: 'already failed',
+      authority: rootAuthority(['delegate_to_bot']),
+      depth: 1,
+    });
+    const result = await executeRun({
+      store,
+      sandbox: sandbox([]),
+      agent: createScriptedAgentRunner(),
+      mcpUrl: 'http://mcp.test',
+      user: { ...person, isAdmin: true },
+      runId: run.id,
+    });
+    expect(result).toEqual({ runId: run.id, text: '', toolNames: [] });
+    expect((await store.getRun(run.id))?.status).toBe('failed');
   });
 
   it('schedules routines on the run channel even when args include another channelId', async () => {
@@ -735,7 +761,7 @@ async function drainRuns(deps: {
       return;
     }
     for (const item of jobs) {
-      const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
+      const runId = asString(item.payload.runId, item.key);
       await executeRun({ ...deps, runId });
       await deps.store.finishWork(item.kind, item.key);
     }

@@ -66,6 +66,7 @@ export type {
 } from './authority.js';
 export {
   botIdentityContent,
+  parseBotIdentityContent,
   DEFAULT_CHANNEL_NAME,
   DEFAULT_TEAM_BOT_IDS,
   defaultChannelParticipants,

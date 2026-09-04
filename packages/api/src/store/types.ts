@@ -182,8 +182,6 @@ export type DelegationRecord = {
 
 export type DelegatedChildInput = {
   authority: AuthorityEnvelope;
-  channelId: string;
-  fromBotId: string;
   objective: string;
   parent: RunRecord;
   requestedCapabilities: string[];
@@ -318,17 +316,6 @@ export type GabotStore = {
   getRun(runId: string): Promise<RunRecord | null>;
   updateRunStatus(runId: string, status: RunStatus, error?: string): Promise<RunRecord | null>;
   listRunsForChannel(channelId: string): Promise<RunRecord[]>;
-  countRunsForRoot(rootRunId: string): Promise<number>;
-  countChildRuns(parentRunId: string): Promise<number>;
-  createDelegation(input: {
-    authorityEnvelope: AuthorityEnvelope;
-    childRunId: string;
-    fromBotId: string;
-    objective: string;
-    parentRunId: string;
-    requestedCapabilities: string[];
-    toBotId: string;
-  }): Promise<DelegationRecord>;
   createDelegatedChild(input: DelegatedChildInput): Promise<RunRecord>;
   listDelegationsForParent(parentRunId: string): Promise<DelegationRecord[]>;
 };

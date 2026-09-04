@@ -376,8 +376,6 @@ async function runDelegate(
   try {
     const child = await input.store.createDelegatedChild({
       parent,
-      channelId,
-      fromBotId: parent.botId,
       toBotId,
       objective,
       requestedCapabilities: requested,

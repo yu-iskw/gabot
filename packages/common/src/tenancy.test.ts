@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { defaultChannelParticipants, mentionedBotId, personalChannelId } from './tenancy.js';
+import {
+  botIdentityContent,
+  defaultChannelParticipants,
+  mentionedBotId,
+  parseBotIdentityContent,
+  personalChannelId,
+} from './tenancy.js';
 
 describe('mentionedBotId', () => {
   it('reads a leading @mention', () => {
@@ -35,5 +41,19 @@ describe('personalChannelId', () => {
   it('is unique per user rather than a shared general channel', () => {
     expect(personalChannelId('user-1')).not.toBe(personalChannelId('user-2'));
     expect(personalChannelId('user-1')).toContain('user-1');
+  });
+});
+
+describe('parseBotIdentityContent', () => {
+  it('reads the bot id from the identity sentence', () => {
+    expect(parseBotIdentityContent(botIdentityContent('monitor'))).toBe('monitor');
+    expect(parseBotIdentityContent(botIdentityContent('general-assistant'))).toBe(
+      'general-assistant',
+    );
+  });
+
+  it('ignores other system text', () => {
+    expect(parseBotIdentityContent('You are .')).toBeUndefined();
+    expect(parseBotIdentityContent('hello')).toBeUndefined();
   });
 });

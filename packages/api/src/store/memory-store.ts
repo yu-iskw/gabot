@@ -514,15 +514,15 @@ export class MemoryStore implements GabotStore {
     return [...this.runs.values()].filter((row) => row.channelId === channelId).map(cloneRun);
   }
 
-  public async countRunsForRoot(rootRunId: string): Promise<number> {
+  private async countRunsForRoot(rootRunId: string): Promise<number> {
     return [...this.runs.values()].filter((row) => row.rootRunId === rootRunId).length;
   }
 
-  public async countChildRuns(parentRunId: string): Promise<number> {
+  private async countChildRuns(parentRunId: string): Promise<number> {
     return [...this.runs.values()].filter((row) => row.parentRunId === parentRunId).length;
   }
 
-  public async createDelegation(input: {
+  private async createDelegation(input: {
     authorityEnvelope: AuthorityEnvelope;
     childRunId: string;
     fromBotId: string;
@@ -562,7 +562,7 @@ export class MemoryStore implements GabotStore {
     const child = await this.createRun({
       workspaceId: parent.workspaceId,
       projectId: parent.projectId,
-      channelId: input.channelId,
+      channelId: parent.channelId,
       parentRunId: parent.id,
       rootRunId: parent.rootRunId,
       botId: input.toBotId,
@@ -576,7 +576,7 @@ export class MemoryStore implements GabotStore {
     await this.createDelegation({
       parentRunId: parent.id,
       childRunId: child.id,
-      fromBotId: input.fromBotId,
+      fromBotId: parent.botId,
       toBotId: input.toBotId,
       objective: input.objective,
       requestedCapabilities: input.requestedCapabilities,
@@ -588,11 +588,11 @@ export class MemoryStore implements GabotStore {
       payload: { runId: child.id },
     });
     await this.appendChannelEvent({
-      channelId: input.channelId,
+      channelId: parent.channelId,
       runId: child.id,
       type: 'agent.delegation.requested',
       actorType: 'bot',
-      actorId: input.fromBotId,
+      actorId: parent.botId,
       payload: { toBotId: input.toBotId, objective: input.objective, parentRunId: parent.id },
     });
     return child;

@@ -1,5 +1,5 @@
 import {
-  cloneAuthority,
+  asStringArray,
   DEFAULT_ALLOW_POLICY,
   DEFAULT_CHANNEL_NAME,
   defaultChannelParticipants,
@@ -44,6 +44,7 @@ import type {
 import type { ActionPolicy, AuthorityEnvelope, VerifiedPerson } from '@gabot/common';
 
 type Sql = ReturnType<typeof postgres>;
+type QuerySql = postgres.Sql;
 
 export class PostgresStore implements GabotStore {
   public constructor(private readonly sql: Sql) {}
@@ -129,13 +130,20 @@ export class PostgresStore implements GabotStore {
 
   public async mintThread(userId: string, channelId: string): Promise<string> {
     const threadId = crypto.randomUUID();
-    const rows = await this.sql<{ thread_id: string }[]>`
+    const inserted = await this.sql<{ thread_id: string }[]>`
       INSERT INTO threads (user_id, channel_id, thread_id)
       VALUES (${userId}, ${channelId}, ${threadId})
-      ON CONFLICT (user_id, channel_id) DO UPDATE SET updated_at = now()
+      ON CONFLICT (user_id, channel_id) DO NOTHING
       RETURNING thread_id
     `;
-    return rows.at(0)?.thread_id ?? threadId;
+    const created = inserted.at(0)?.thread_id;
+    if (created) {
+      return created;
+    }
+    const existing = await this.sql<{ thread_id: string }[]>`
+      SELECT thread_id FROM threads WHERE user_id = ${userId} AND channel_id = ${channelId}
+    `;
+    return existing.at(0)?.thread_id ?? threadId;
   }
 
   public async getPolicy(): Promise<ActionPolicy> {
@@ -443,7 +451,7 @@ export class PostgresStore implements GabotStore {
       INSERT INTO channels (id, name, description, project_id)
       VALUES (${id}, ${input.name}, '', ${workspace.projectId})
     `;
-    await this.attachChannelParties(id, input.userId, input.agentId);
+    await this.attachChannelParties(this.sql, id, input.userId, input.agentId);
     return { id, name: input.name, description: '', lastMessage: null };
   }
 
@@ -843,53 +851,6 @@ export class PostgresStore implements GabotStore {
     return rows.map(toRunRecord);
   }
 
-  public async countRunsForRoot(rootRunId: string): Promise<number> {
-    const rows = await this.sql<{ n: string }[]>`
-      SELECT count(*)::text AS n FROM runs WHERE root_run_id = ${rootRunId}
-    `;
-    return Number.parseInt(rows.at(0)?.n ?? '0', 10);
-  }
-
-  public async countChildRuns(parentRunId: string): Promise<number> {
-    const rows = await this.sql<{ n: string }[]>`
-      SELECT count(*)::text AS n FROM runs WHERE parent_run_id = ${parentRunId}
-    `;
-    return Number.parseInt(rows.at(0)?.n ?? '0', 10);
-  }
-
-  public async createDelegation(input: {
-    authorityEnvelope: AuthorityEnvelope;
-    childRunId: string;
-    fromBotId: string;
-    objective: string;
-    parentRunId: string;
-    requestedCapabilities: string[];
-    toBotId: string;
-  }): Promise<DelegationRecord> {
-    const id = crypto.randomUUID();
-    await this.sql`
-      INSERT INTO delegations (
-        id, parent_run_id, child_run_id, from_bot_id, to_bot_id, objective,
-        requested_capabilities, authority_envelope
-      )
-      VALUES (
-        ${id}, ${input.parentRunId}, ${input.childRunId}, ${input.fromBotId}, ${input.toBotId},
-        ${input.objective}, ${JSON.stringify(input.requestedCapabilities)}::jsonb,
-        ${JSON.stringify(input.authorityEnvelope)}::jsonb
-      )
-    `;
-    return {
-      id,
-      parentRunId: input.parentRunId,
-      childRunId: input.childRunId,
-      fromBotId: input.fromBotId,
-      toBotId: input.toBotId,
-      objective: input.objective,
-      requestedCapabilities: [...input.requestedCapabilities],
-      authorityEnvelope: cloneAuthority(input.authorityEnvelope),
-    };
-  }
-
   public async createDelegatedChild(input: DelegatedChildInput): Promise<RunRecord> {
     return insertDelegatedChild(this.sql, input);
   }
@@ -903,7 +864,7 @@ export class PostgresStore implements GabotStore {
         id: string;
         objective: string;
         parent_run_id: string;
-        requested_capabilities: string[];
+        requested_capabilities: unknown;
         to_bot_id: string;
       }[]
     >`
@@ -918,9 +879,7 @@ export class PostgresStore implements GabotStore {
       fromBotId: row.from_bot_id,
       toBotId: row.to_bot_id,
       objective: row.objective,
-      requestedCapabilities: Array.isArray(row.requested_capabilities)
-        ? row.requested_capabilities
-        : [],
+      requestedCapabilities: asStringArray(row.requested_capabilities),
       authorityEnvelope: parseEnvelope(row.authority_envelope),
     }));
   }
@@ -929,58 +888,69 @@ export class PostgresStore implements GabotStore {
     const workspaceId = personalWorkspaceId(user.id);
     const projectId = personalProjectId(user.id);
     const channelId = personalChannelId(user.id);
-    const existing = await this.sql<{ id: string }[]>`
-      SELECT id FROM workspaces WHERE id = ${workspaceId}
-    `;
-    if (existing.length === 0) {
-      await this.sql`
+    const orgRole = user.isAdmin ? 'admin' : 'member';
+    await this.sql.begin(async (sql) => {
+      await sql`
         INSERT INTO organizations (id, name) VALUES (${PLATFORM_ORG_ID}, 'gabot')
         ON CONFLICT (id) DO NOTHING
       `;
-      const orgRole = user.isAdmin ? 'admin' : 'member';
-      await this.sql`
+      await sql`
         INSERT INTO organization_members (organization_id, user_id, role)
         VALUES (${PLATFORM_ORG_ID}, ${user.id}, ${orgRole})
         ON CONFLICT DO NOTHING
       `;
-      await this.sql`
+      await sql`
         INSERT INTO workspaces (id, organization_id, owner_user_id, name)
         VALUES (${workspaceId}, ${PLATFORM_ORG_ID}, ${user.id}, ${`${user.name}'s workspace`})
         ON CONFLICT (id) DO NOTHING
       `;
-      await this.sql`
+      await sql`
         INSERT INTO projects (id, workspace_id, name)
         VALUES (${projectId}, ${workspaceId}, 'Default')
         ON CONFLICT (id) DO NOTHING
       `;
-      await this.sql`
+      await sql`
         INSERT INTO channels (id, name, description, project_id)
         VALUES (${channelId}, ${DEFAULT_CHANNEL_NAME}, 'Default coworker channel', ${projectId})
         ON CONFLICT (id) DO NOTHING
       `;
-    }
-    await this.retireSharedGeneral(user.id);
-    await this.attachChannelParties(channelId, user.id);
+      await Promise.all([
+        this.retireSharedGeneral(sql, user.id),
+        this.attachChannelParties(sql, channelId, user.id),
+      ]);
+    });
   }
 
-  private async retireSharedGeneral(userId: string): Promise<void> {
-    await this.sql`
-      DELETE FROM channel_memberships WHERE channel_id = 'general' AND user_id = ${userId}
-    `;
-    await this.sql`
-      DELETE FROM channel_participants
-      WHERE channel_id = 'general' AND principal_type = 'user' AND principal_id = ${userId}
-    `;
+  private async retireSharedGeneral(sql: QuerySql, userId: string): Promise<void> {
+    await Promise.all([
+      sql`
+        DELETE FROM channel_memberships WHERE channel_id = 'general' AND user_id = ${userId}
+      `,
+      sql`
+        DELETE FROM channel_participants
+        WHERE channel_id = 'general' AND principal_type = 'user' AND principal_id = ${userId}
+      `,
+    ]);
   }
 
   private async attachChannelParties(
+    sql: QuerySql,
     channelId: string,
     userId: string,
     extraBotId?: string,
   ): Promise<void> {
-    for (const party of defaultChannelParticipants(channelId, userId, extraBotId)) {
-      await this.addChannelParticipant(party);
-    }
+    const parties = defaultChannelParticipants(channelId, userId, extraBotId);
+    await sql`
+      INSERT INTO channel_participants ${sql(
+        parties.map((party) => ({
+          channel_id: party.channelId,
+          principal_type: party.principalType,
+          principal_id: party.principalId,
+          role: party.role,
+        })),
+      )}
+      ON CONFLICT DO NOTHING
+    `;
   }
 }
 
