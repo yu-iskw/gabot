@@ -6,7 +6,8 @@ import { DelegationBudgetError } from './types.js';
 import type { DelegatedChildInput, RunRecord } from './types.js';
 import type postgres from 'postgres';
 
-type Sql = ReturnType<typeof postgres>;
+type Sql = postgres.Sql;
+type TxSql = postgres.TransactionSql;
 
 export async function insertDelegatedChild(
   sql: Sql,
@@ -15,7 +16,7 @@ export async function insertDelegatedChild(
   return sql.begin((tx) => writeDelegatedChild(tx, input));
 }
 
-async function writeDelegatedChild(sql: Sql, input: DelegatedChildInput): Promise<RunRecord> {
+async function writeDelegatedChild(sql: TxSql, input: DelegatedChildInput): Promise<RunRecord> {
   const parent = input.parent;
   const childCount = await countWhere(sql, 'parent_run_id', parent.id);
   const rootRunCount = await countWhere(sql, 'root_run_id', parent.rootRunId);
@@ -85,7 +86,7 @@ async function writeDelegatedChild(sql: Sql, input: DelegatedChildInput): Promis
 }
 
 async function countWhere(
-  sql: Sql,
+  sql: TxSql,
   column: 'parent_run_id' | 'root_run_id',
   value: string,
 ): Promise<number> {
