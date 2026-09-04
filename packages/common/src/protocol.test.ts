@@ -144,6 +144,15 @@ describe('decideScriptedTurn', () => {
     ]);
     expect(coder.text.toLowerCase()).toContain('coding');
   });
+
+  it('prefers an explicit botId over scraping the system prompt', () => {
+    const turn = decideScriptedTurn(
+      [{ role: 'user', content: 'inspect production errors from the last 24 hours' }],
+      'monitor',
+    );
+    expect(turn.toolCalls[0]?.name).toBe(DELEGATE_TO_BOT);
+    expect(turn.toolCalls[0]?.arguments.botId).toBe('triage');
+  });
 });
 
 describe('createOpenAiCompatibleModel', () => {

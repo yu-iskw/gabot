@@ -1,7 +1,8 @@
 import {
+  cloneAuthority,
   DEFAULT_ALLOW_POLICY,
   DEFAULT_CHANNEL_NAME,
-  DEFAULT_TEAM_BOT_IDS,
+  defaultChannelParticipants,
   nextRoutineRun,
   personalChannelId,
   personalProjectId,
@@ -882,7 +883,7 @@ export class PostgresStore implements GabotStore {
       toBotId: input.toBotId,
       objective: input.objective,
       requestedCapabilities: [...input.requestedCapabilities],
-      authorityEnvelope: { allowedTools: [...input.authorityEnvelope.allowedTools] },
+      authorityEnvelope: cloneAuthority(input.authorityEnvelope),
     };
   }
 
@@ -921,6 +922,12 @@ export class PostgresStore implements GabotStore {
     const workspaceId = personalWorkspaceId(user.id);
     const projectId = personalProjectId(user.id);
     const channelId = personalChannelId(user.id);
+    const existing = await this.sql<{ id: string }[]>`
+      SELECT id FROM workspaces WHERE id = ${workspaceId}
+    `;
+    if (existing.length > 0) {
+      return;
+    }
     await this.sql`
       INSERT INTO organizations (id, name) VALUES (${PLATFORM_ORG_ID}, 'gabot')
       ON CONFLICT (id) DO NOTHING
@@ -954,23 +961,8 @@ export class PostgresStore implements GabotStore {
     userId: string,
     extraBotId?: string,
   ): Promise<void> {
-    await this.addChannelParticipant({
-      channelId,
-      principalType: 'user',
-      principalId: userId,
-      role: 'owner',
-    });
-    const bots = new Set<string>(DEFAULT_TEAM_BOT_IDS);
-    if (extraBotId) {
-      bots.add(extraBotId);
-    }
-    for (const botId of bots) {
-      await this.addChannelParticipant({
-        channelId,
-        principalType: 'bot',
-        principalId: botId,
-        role: 'bot',
-      });
+    for (const party of defaultChannelParticipants(channelId, userId, extraBotId)) {
+      await this.addChannelParticipant(party);
     }
   }
 }
@@ -1005,7 +997,7 @@ function parseEnvelope(value: AuthorityEnvelope | string): AuthorityEnvelope {
     }
     return { allowedTools: [] };
   }
-  return { allowedTools: [...value.allowedTools] };
+  return cloneAuthority(value);
 }
 
 function toRunStatus(value: string): RunStatus {

@@ -18,12 +18,12 @@ const NAVIGATE_RE = /example\.com|navigate/i;
 const NOTE_RE = /note/i;
 const NAMED_RE = /named\s+([^,.]+)/i;
 
-export function decideScriptedTurn(messages: ChatMessage[]): ModelTurn {
+export function decideScriptedTurn(messages: ChatMessage[], botId?: string): ModelTurn {
   const last = messages.at(-1);
   if (last?.role === 'tool') {
     return { text: summarizeTool(last), toolCalls: [] };
   }
-  return matchUserTurn(findLast(messages, 'user')?.content ?? '', identityBotId(messages));
+  return matchUserTurn(findLast(messages, 'user')?.content ?? '', botId ?? identityBotId(messages));
 }
 
 function identityBotId(messages: ChatMessage[]): string | undefined {
@@ -249,14 +249,6 @@ function summarizeTool(message: ChatMessage): string {
   }
   if (message.toolName === COMPONENT_NOTE) {
     return 'Rendered the granted note component.';
-  }
-  if (
-    message.toolName === CREATE_BOT ||
-    message.toolName === CREATE_ROUTINE ||
-    message.toolName === UPDATE_ROUTINE ||
-    message.toolName === DELEGATE_TO_BOT
-  ) {
-    return message.content || 'Done.';
   }
   return message.content || 'Done.';
 }

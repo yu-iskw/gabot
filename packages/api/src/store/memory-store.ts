@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  cloneAuthority,
   DEFAULT_ALLOW_POLICY,
   DEFAULT_CHANNEL_NAME,
-  DEFAULT_TEAM_BOT_IDS,
+  defaultChannelParticipants,
   nextRoutineRun,
   personalChannelId,
   personalProjectId,
   personalWorkspaceId,
   PLATFORM_ORG_ID,
+  TEAM_BOT_PROFILES,
 } from '@gabot/common';
 
 import { PROTECTED_AGENT_ID } from './types.js';
@@ -63,36 +65,7 @@ type WorkspaceRow = {
   projectId: string;
 };
 
-const TEAM_BOTS: AgentProfile[] = [
-  {
-    id: 'general-assistant',
-    name: 'General Assistant',
-    title: 'General Assistant',
-    roleDescription: 'Helps with governed computer and MCP work.',
-    visibility: 'public',
-  },
-  {
-    id: 'monitor',
-    name: 'Monitor',
-    title: 'Monitor',
-    roleDescription: 'Watches systems and delegates triage.',
-    visibility: 'public',
-  },
-  {
-    id: 'triage',
-    name: 'Triage',
-    title: 'Triage',
-    roleDescription: 'Turns incidents into actionable work and delegates coding.',
-    visibility: 'public',
-  },
-  {
-    id: 'coder',
-    name: 'Coder',
-    title: 'Coder',
-    roleDescription: 'Implements delegated coding work.',
-    visibility: 'public',
-  },
-];
+const TEAM_BOTS: AgentProfile[] = TEAM_BOT_PROFILES.map((bot) => ({ ...bot }));
 
 export class MemoryStore implements GabotStore {
   private readonly users = new Map<string, UserRow>();
@@ -500,14 +473,14 @@ export class MemoryStore implements GabotStore {
       triggerType: input.triggerType,
       status: input.status,
       objective: input.objective,
-      authority: { allowedTools: [...input.authority.allowedTools] },
+      authority: cloneAuthority(input.authority),
       depth: input.depth,
       startedAt: input.status === 'running' ? new Date() : null,
       finishedAt: null,
       error: null,
     };
     this.runs.set(id, record);
-    return { ...record, authority: { allowedTools: [...record.authority.allowedTools] } };
+    return { ...record, authority: cloneAuthority(record.authority) };
   }
 
   public async getRun(runId: string): Promise<RunRecord | null> {
@@ -564,13 +537,13 @@ export class MemoryStore implements GabotStore {
       toBotId: input.toBotId,
       objective: input.objective,
       requestedCapabilities: [...input.requestedCapabilities],
-      authorityEnvelope: { allowedTools: [...input.authorityEnvelope.allowedTools] },
+      authorityEnvelope: cloneAuthority(input.authorityEnvelope),
     };
     this.delegations.push(record);
     return {
       ...record,
       requestedCapabilities: [...record.requestedCapabilities],
-      authorityEnvelope: { allowedTools: [...record.authorityEnvelope.allowedTools] },
+      authorityEnvelope: cloneAuthority(record.authorityEnvelope),
     };
   }
 
@@ -580,7 +553,7 @@ export class MemoryStore implements GabotStore {
       .map((row) => ({
         ...row,
         requestedCapabilities: [...row.requestedCapabilities],
-        authorityEnvelope: { allowedTools: [...row.authorityEnvelope.allowedTools] },
+        authorityEnvelope: cloneAuthority(row.authorityEnvelope),
       }));
   }
 
@@ -746,26 +719,8 @@ export class MemoryStore implements GabotStore {
   }
 
   private attachChannelParties(channelId: string, userId: string, extraBotId?: string): void {
-    this.rememberParticipant({
-      channelId,
-      principalType: 'user',
-      principalId: userId,
-      role: 'owner',
-    });
-    if (!this.memberships.some((row) => row.channelId === channelId && row.userId === userId)) {
-      this.memberships.push({ channelId, userId });
-    }
-    const bots = new Set<string>(DEFAULT_TEAM_BOT_IDS);
-    if (extraBotId) {
-      bots.add(extraBotId);
-    }
-    for (const botId of bots) {
-      this.rememberParticipant({
-        channelId,
-        principalType: 'bot',
-        principalId: botId,
-        role: 'bot',
-      });
+    for (const party of defaultChannelParticipants(channelId, userId, extraBotId)) {
+      this.rememberParticipant(party);
     }
   }
 
@@ -823,5 +778,5 @@ function toChannelRecord(channel: ChannelRow): ChannelRecord {
 }
 
 function cloneRun(row: RunRecord): RunRecord {
-  return { ...row, authority: { allowedTools: [...row.authority.allowedTools] } };
+  return { ...row, authority: cloneAuthority(row.authority) };
 }

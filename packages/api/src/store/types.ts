@@ -1,4 +1,9 @@
-import type { ActionPolicy, AuthorityEnvelope, VerifiedPerson } from '@gabot/common';
+import {
+  GENERAL_ASSISTANT_ID,
+  type ActionPolicy,
+  type AuthorityEnvelope,
+  type VerifiedPerson,
+} from '@gabot/common';
 
 export type ChannelRecord = {
   id: string;
@@ -305,4 +310,4 @@ export type GabotStore = {
   listDelegationsForParent(parentRunId: string): Promise<DelegationRecord[]>;
 };
 
-export const PROTECTED_AGENT_ID = 'general-assistant';
+export const PROTECTED_AGENT_ID = GENERAL_ASSISTANT_ID;

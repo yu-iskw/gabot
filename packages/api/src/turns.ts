@@ -1,38 +1,37 @@
 import {
   collectText,
   collectToolCalls,
-  COMPONENT_NOTE_TOOL,
-  COMPUTER_TOOLS,
-  CREATE_BOT_TOOL,
-  CREATE_ROUTINE_TOOL,
   decideScriptedTurn,
-  DELEGATE_TO_BOT_TOOL,
-  MCP_ECHO_TOOL,
   mentionedBotId,
   parseAguiSse,
   rootAuthority,
   runModelAsAgui,
   TURN_TOOL_NAMES,
-  UPDATE_ROUTINE_TOOL,
+  TURN_TOOLS,
 } from '@gabot/common';
 
 import { runGatewayAction } from './gateway.js';
+import { PROTECTED_AGENT_ID } from './store/types.js';
 
 import type { GabotStore, RunRecord, SessionUser } from './store/types.js';
 import type { AguiRunInput, AguiToolCall, ModelPort, SandboxPort } from '@gabot/common';
 
+type AgentRunInput = AguiRunInput & { botId?: string };
+
 export type AgentRunner = {
-  run(input: AguiRunInput): Promise<AguiEventList>;
+  run(input: AgentRunInput): Promise<AguiEventList>;
 };
 
 type AguiEventList = Awaited<ReturnType<typeof runModelAsAgui>>;
 
 export function createScriptedAgentRunner(): AgentRunner {
-  const model: ModelPort = {
-    complete: ({ messages }) => Promise.resolve(decideScriptedTurn(messages)),
-  };
   return {
-    run: async (input) => runModelAsAgui(model, input),
+    run: async (input) => {
+      const model: ModelPort = {
+        complete: ({ messages }) => Promise.resolve(decideScriptedTurn(messages, input.botId)),
+      };
+      return runModelAsAgui(model, input);
+    },
   };
 }
 
@@ -70,24 +69,14 @@ export type TurnResult = {
   toolNames: string[];
 };
 
-const DEFAULT_BOT = 'general-assistant';
-
-const TURN_TOOLS = [
-  ...COMPUTER_TOOLS,
-  MCP_ECHO_TOOL,
-  COMPONENT_NOTE_TOOL,
-  CREATE_BOT_TOOL,
-  CREATE_ROUTINE_TOOL,
-  UPDATE_ROUTINE_TOOL,
-  DELEGATE_TO_BOT_TOOL,
-].map((tool) => ({
+const OFFERED_TOOLS = TURN_TOOLS.map((tool) => ({
   name: tool.name,
   description: tool.description,
   parameters: { ...tool.parameters },
 }));
 
 export async function executeTurn(input: TurnInput): Promise<TurnResult> {
-  const botId = input.botId ?? mentionedBotId(input.message) ?? DEFAULT_BOT;
+  const botId = input.botId ?? mentionedBotId(input.message) ?? PROTECTED_AGENT_ID;
   await input.store.appendMessage({
     channelId: input.channelId,
     role: 'user',
@@ -109,17 +98,15 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
     authority: rootAuthority(TURN_TOOL_NAMES),
     depth: 0,
   });
-  await input.store.appendChannelEvent({
-    channelId: input.channelId,
-    runId: run.id,
+  await recordRunEvent(input.store, {
+    run,
     type: 'message.user',
     actorType: 'user',
     actorId: input.user.id,
     payload: { message: input.message },
   });
-  await input.store.appendChannelEvent({
-    channelId: input.channelId,
-    runId: run.id,
+  await recordRunEvent(input.store, {
+    run,
     type: 'run.started',
     actorType: 'bot',
     actorId: botId,
@@ -156,9 +143,8 @@ export async function executeRun(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'run failed';
     await input.store.updateRunStatus(run.id, 'failed', message);
-    await input.store.appendChannelEvent({
-      channelId: run.channelId,
-      runId: run.id,
+    await recordRunEvent(input.store, {
+      run,
       type: run.parentRunId ? 'agent.delegation.failed' : 'run.failed',
       actorType: 'bot',
       actorId: run.botId,
@@ -187,7 +173,8 @@ async function completeRun(
       threadId,
       runId: run.id,
       messages: current,
-      tools: TURN_TOOLS,
+      tools: OFFERED_TOOLS,
+      botId: run.botId,
     });
     const calls = collectToolCalls(events);
     const chunk = collectText(events);
@@ -208,17 +195,15 @@ async function completeRun(
     });
   }
   await input.store.updateRunStatus(run.id, 'succeeded');
-  await input.store.appendChannelEvent({
-    channelId: run.channelId,
-    runId: run.id,
+  await recordRunEvent(input.store, {
+    run,
     type: 'run.succeeded',
     actorType: 'bot',
     actorId: run.botId,
   });
   if (run.parentRunId) {
-    await input.store.appendChannelEvent({
-      channelId: run.channelId,
-      runId: run.id,
+    await recordRunEvent(input.store, {
+      run,
       type: 'agent.delegation.completed',
       actorType: 'bot',
       actorId: run.botId,
@@ -262,9 +247,8 @@ async function applyToolCalls(
   let next = [...messages];
   for (const call of calls) {
     toolNames.push(call.name);
-    await input.store.appendChannelEvent({
-      channelId: run.channelId,
-      runId: run.id,
+    await recordRunEvent(input.store, {
+      run,
       type: 'tool.requested',
       actorType: 'bot',
       actorId: run.botId,
@@ -281,9 +265,8 @@ async function applyToolCalls(
       channelId: run.channelId,
       run,
     });
-    await input.store.appendChannelEvent({
-      channelId: run.channelId,
-      runId: run.id,
+    await recordRunEvent(input.store, {
+      run,
       type: result.ok ? 'tool.completed' : 'tool.denied',
       actorType: 'bot',
       actorId: run.botId,
@@ -306,6 +289,26 @@ async function applyToolCalls(
     });
   }
   return next;
+}
+
+function recordRunEvent(
+  store: GabotStore,
+  event: {
+    actorId: string;
+    actorType: string;
+    payload?: Record<string, unknown>;
+    run: Pick<RunRecord, 'channelId' | 'id'>;
+    type: string;
+  },
+): Promise<unknown> {
+  return store.appendChannelEvent({
+    channelId: event.run.channelId,
+    runId: event.run.id,
+    type: event.type,
+    actorType: event.actorType,
+    actorId: event.actorId,
+    payload: event.payload,
+  });
 }
 
 function roleOf(role: string): 'user' | 'assistant' | 'tool' | 'system' {

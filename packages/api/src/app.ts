@@ -33,7 +33,7 @@ type ApiOptions = {
   adminEmails: string[];
 };
 
-const BOT = 'general-assistant';
+const BOT = PROTECTED_AGENT_ID;
 const API_AGENTS = '/api/agents';
 const API_CHANNELS = '/api/channels';
 const API_ROUTINES = '/api/routines';

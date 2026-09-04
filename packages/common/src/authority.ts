@@ -9,6 +9,8 @@ export type AuthorityEnvelope = {
 export type AuthorityResult =
   { envelope: AuthorityEnvelope; ok: true } | { ok: false; reason: string };
 
+export type BudgetResult = { ok: true } | { ok: false; reason: string };
+
 export type DelegationBudget = {
   childCount: number;
   depth: number;
@@ -20,6 +22,10 @@ export type DelegationBudget = {
 
 export function rootAuthority(allowedTools: readonly string[]): AuthorityEnvelope {
   return { allowedTools: uniqueTools(allowedTools) };
+}
+
+export function cloneAuthority(envelope: AuthorityEnvelope): AuthorityEnvelope {
+  return { allowedTools: uniqueTools(envelope.allowedTools) };
 }
 
 export function attenuateAuthority(
@@ -45,7 +51,7 @@ export function runMayInvoke(envelope: AuthorityEnvelope, toolName: string): boo
   return envelope.allowedTools.includes(toolName);
 }
 
-export function assertDelegationBudget(input: DelegationBudget): AuthorityResult {
+export function assertDelegationBudget(input: DelegationBudget): BudgetResult {
   const maxDepth = input.maxDepth ?? DEFAULT_MAX_DELEGATION_DEPTH;
   const maxChildRuns = input.maxChildRuns ?? DEFAULT_MAX_CHILD_RUNS;
   const maxRunsPerRoot = input.maxRunsPerRoot ?? DEFAULT_MAX_RUNS_PER_ROOT;
@@ -67,7 +73,7 @@ export function assertDelegationBudget(input: DelegationBudget): AuthorityResult
       reason: `Root already has ${String(input.rootRunCount)} runs; max is ${String(maxRunsPerRoot)}`,
     };
   }
-  return { ok: true, envelope: { allowedTools: [] } };
+  return { ok: true };
 }
 
 function uniqueTools(tools: readonly string[]): string[] {
