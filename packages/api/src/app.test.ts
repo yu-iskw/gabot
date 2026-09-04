@@ -50,6 +50,28 @@ function appWith(store: MemoryStore, navigations: string[] = []) {
   });
 }
 
+describe('schema sql', () => {
+  it('creates vector extension before mastra tables', () => {
+    const extension = SCHEMA_SQL.indexOf('CREATE EXTENSION IF NOT EXISTS vector');
+    const mastra = SCHEMA_SQL.indexOf('mastra_threads');
+    expect(extension).toBeGreaterThanOrEqual(0);
+    expect(mastra).toBeGreaterThan(extension);
+    expect(schema.users).toBeDefined();
+    expect(schema.actionPolicy).toBeDefined();
+    expect(schema.workspaces).toBeDefined();
+    expect(schema.organizationMembers).toBeDefined();
+    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS runs');
+    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS organization_members');
+    expect(SCHEMA_SQL).toContain("WHERE channel_id = 'general'");
+    expect(SCHEMA_SQL).toContain('FROM channel_memberships');
+    expect(DEFAULT_ALLOW_POLICY.allow).toEqual(['true']);
+    const provision = SCHEMA_SQL.indexOf("ch-' || id || '-general'");
+    const retarget = SCHEMA_SQL.indexOf('UPDATE routines');
+    expect(provision).toBeGreaterThanOrEqual(0);
+    expect(retarget).toBeGreaterThan(provision);
+  });
+});
+
 describe('control plane', () => {
   it('refuses missing bearer tokens', async () => {
     const app = appWith(new MemoryStore());
@@ -148,26 +170,6 @@ describe('control plane', () => {
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(0);
     await store.finishWork('handoff', 'a');
-  });
-
-  it('creates vector extension before mastra tables', () => {
-    const extension = SCHEMA_SQL.indexOf('CREATE EXTENSION IF NOT EXISTS vector');
-    const mastra = SCHEMA_SQL.indexOf('mastra_threads');
-    expect(extension).toBeGreaterThanOrEqual(0);
-    expect(mastra).toBeGreaterThan(extension);
-    expect(schema.users).toBeDefined();
-    expect(schema.actionPolicy).toBeDefined();
-    expect(schema.workspaces).toBeDefined();
-    expect(schema.organizationMembers).toBeDefined();
-    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS runs');
-    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS organization_members');
-    expect(SCHEMA_SQL).toContain("WHERE channel_id = 'general'");
-    expect(SCHEMA_SQL).toContain('FROM channel_memberships');
-    expect(DEFAULT_ALLOW_POLICY.allow).toEqual(['true']);
-    const provision = SCHEMA_SQL.indexOf("ch-' || id || '-general'");
-    const retarget = SCHEMA_SQL.indexOf('UPDATE routines');
-    expect(provision).toBeGreaterThanOrEqual(0);
-    expect(retarget).toBeGreaterThan(provision);
   });
 
   it('covers session, computer, turn, and internal routes', async () => {

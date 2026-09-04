@@ -171,8 +171,10 @@ export async function runTick(input: {
   return { claimed: claimed.length, routines };
 }
 
+type WorkItem = { kind: string; key: string; payload: Record<string, unknown> };
+
 async function handleItem(
-  item: { kind: string; key: string; payload: Record<string, unknown> },
+  item: WorkItem,
   input: { sql: JobSql; apiUrl: string; secret: string },
 ): Promise<void> {
   try {
@@ -198,24 +200,30 @@ async function handleItem(
     }
     await finishWork(input.sql, item.kind, item.key);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'job failed';
-    if (item.kind === 'run.execute') {
-      const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
-      const rows = await input.sql<{ status: string }[]>`
-        SELECT status FROM runs WHERE id = ${runId}
-      `;
-      const disposition = runExecuteFailureDisposition(rows.at(0)?.status);
-      if (disposition === 'unclaim') {
-        await unclaimWork(input.sql, item.kind, item.key, message);
-        return;
-      }
-      if (disposition === 'hold') {
-        await holdWork(input.sql, item.kind, item.key, message);
-        return;
-      }
-    }
-    await finishWork(input.sql, item.kind, item.key, message);
+    await settleFailedItem(item, input.sql, error);
   }
+}
+
+async function settleFailedItem(item: WorkItem, sql: JobSql, error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : 'job failed';
+  if (item.kind !== 'run.execute') {
+    await finishWork(sql, item.kind, item.key, message);
+    return;
+  }
+  const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
+  const rows = await sql<{ status: string }[]>`
+    SELECT status FROM runs WHERE id = ${runId}
+  `;
+  const disposition = runExecuteFailureDisposition(rows.at(0)?.status);
+  if (disposition === 'unclaim') {
+    await unclaimWork(sql, item.kind, item.key, message);
+    return;
+  }
+  if (disposition === 'hold') {
+    await holdWork(sql, item.kind, item.key, message);
+    return;
+  }
+  await finishWork(sql, item.kind, item.key, message);
 }
 
 export function createJobsApp(tick: () => Promise<unknown>): Hono {
