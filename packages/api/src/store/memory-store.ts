@@ -355,6 +355,12 @@ export class MemoryStore implements GabotStore {
       return false;
     }
     this.agents.splice(index, 1);
+    for (let i = this.participants.length - 1; i >= 0; i -= 1) {
+      const row = this.participants[i];
+      if (row?.principalType === 'bot' && row.principalId === id) {
+        this.participants.splice(i, 1);
+      }
+    }
     return true;
   }
 

@@ -164,6 +164,10 @@ describe('control plane', () => {
     expect(SCHEMA_SQL).toContain("WHERE channel_id = 'general'");
     expect(SCHEMA_SQL).toContain('FROM channel_memberships');
     expect(DEFAULT_ALLOW_POLICY.allow).toEqual(['true']);
+    const provision = SCHEMA_SQL.indexOf("ch-' || id || '-general'");
+    const retarget = SCHEMA_SQL.indexOf('UPDATE routines');
+    expect(provision).toBeGreaterThanOrEqual(0);
+    expect(retarget).toBeGreaterThan(provision);
   });
 
   it('covers session, computer, turn, and internal routes', async () => {
@@ -388,7 +392,15 @@ describe('control plane', () => {
     });
     expect(created.status).toBe(201);
     const agentBody = (await created.json()) as { agent: { id: string } };
-    const patched = await app.request(`/api/agents/${agentBody.agent.id}`, {
+    const botId = agentBody.agent.id;
+    await store.addChannelParticipant({
+      channelId: defaultChannel,
+      principalId: botId,
+      principalType: 'bot',
+      role: 'bot',
+    });
+    expect(await store.isChannelParticipant(defaultChannel, 'bot', botId)).toBe(true);
+    const patched = await app.request(`/api/agents/${botId}`, {
       method: 'PATCH',
       headers,
       body: JSON.stringify({ title: 'Renamed' }),
@@ -398,10 +410,10 @@ describe('control plane', () => {
     expect(
       (await app.request('/api/agents/general-assistant', { method: 'DELETE', headers })).status,
     ).toBe(409);
-    expect(
-      (await app.request(`/api/agents/${agentBody.agent.id}`, { method: 'DELETE', headers }))
-        .status,
-    ).toBe(200);
+    expect((await app.request(`/api/agents/${botId}`, { method: 'DELETE', headers })).status).toBe(
+      200,
+    );
+    expect(await store.isChannelParticipant(defaultChannel, 'bot', botId)).toBe(false);
 
     const skill = await app.request('/api/skills', {
       method: 'POST',

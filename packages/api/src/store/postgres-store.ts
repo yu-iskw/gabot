@@ -431,9 +431,15 @@ export class PostgresStore implements GabotStore {
     if (id === PROTECTED_AGENT_ID) {
       return false;
     }
-    const rows = await this.sql<{ id: string }[]>`
-      DELETE FROM agents WHERE id = ${id} RETURNING id
-    `;
+    const rows = await this.sql.begin(async (sql) => {
+      await sql`
+        DELETE FROM channel_participants
+        WHERE principal_type = 'bot' AND principal_id = ${id}
+      `;
+      return sql<{ id: string }[]>`
+        DELETE FROM agents WHERE id = ${id} RETURNING id
+      `;
+    });
     return rows.length > 0;
   }
 

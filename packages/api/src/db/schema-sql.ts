@@ -326,6 +326,46 @@ CREATE TABLE IF NOT EXISTS delegations (
 );
 CREATE INDEX IF NOT EXISTS delegations_parent_idx ON delegations (parent_run_id);
 
+INSERT INTO organizations (id, name)
+VALUES ('org-gabot', 'gabot')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO organization_members (organization_id, user_id, role)
+SELECT 'org-gabot', u.id,
+  CASE WHEN EXISTS (
+    SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = 'admin'
+  ) THEN 'admin' ELSE 'member' END
+FROM users u
+ON CONFLICT DO NOTHING;
+
+INSERT INTO workspaces (id, organization_id, owner_user_id, name)
+SELECT 'ws-' || id, 'org-gabot', id, COALESCE(name, 'User') || '''s workspace'
+FROM users
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO projects (id, workspace_id, name)
+SELECT 'proj-' || id, 'ws-' || id, 'Default'
+FROM users
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO channels (id, name, description, project_id)
+SELECT 'ch-' || id || '-general', 'General', 'Default coworker channel', 'proj-' || id
+FROM users
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+SELECT 'ch-' || id || '-general', 'user', id, 'owner'
+FROM users
+ON CONFLICT DO NOTHING;
+
+INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+SELECT 'ch-' || u.id || '-general', 'bot', b.id, 'bot'
+FROM users u
+CROSS JOIN (
+  VALUES ('general-assistant'), ('monitor'), ('triage'), ('coder')
+) AS b(id)
+ON CONFLICT DO NOTHING;
+
 UPDATE routines
 SET channel_id = 'ch-' || owner_user_id || '-general'
 WHERE channel_id = 'general';

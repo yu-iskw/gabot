@@ -74,9 +74,12 @@ describe('jobs', () => {
 });
 
 describe('runExecuteFailureDisposition', () => {
-  it('retries queued and running hops after a delivery failure', () => {
+  it('retries a queued hop immediately after a delivery failure', () => {
     expect(runExecuteFailureDisposition('queued')).toBe('unclaim');
-    expect(runExecuteFailureDisposition('running')).toBe('unclaim');
+  });
+
+  it('keeps the lease when the hop is still running', () => {
+    expect(runExecuteFailureDisposition('running')).toBe('hold');
   });
 
   it('finishes terminal or missing runs so unique work keys do not loop', () => {

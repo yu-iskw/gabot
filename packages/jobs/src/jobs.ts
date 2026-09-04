@@ -46,9 +46,22 @@ async function unclaimWork(sql: JobSql, kind: string, key: string, error: string
   `;
 }
 
-export function runExecuteFailureDisposition(status: string | undefined): 'finish' | 'unclaim' {
-  if (status === 'queued' || status === 'running') {
+async function holdWork(sql: JobSql, kind: string, key: string, error: string): Promise<void> {
+  await sql`
+    UPDATE work_items
+    SET last_error = ${error}, updated_at = now()
+    WHERE kind = ${kind} AND key = ${key} AND finished_at IS NULL
+  `;
+}
+
+export function runExecuteFailureDisposition(
+  status: string | undefined,
+): 'finish' | 'hold' | 'unclaim' {
+  if (status === 'queued') {
     return 'unclaim';
+  }
+  if (status === 'running') {
+    return 'hold';
   }
   return 'finish';
 }
@@ -191,8 +204,13 @@ async function handleItem(
       const rows = await input.sql<{ status: string }[]>`
         SELECT status FROM runs WHERE id = ${runId}
       `;
-      if (runExecuteFailureDisposition(rows.at(0)?.status) === 'unclaim') {
+      const disposition = runExecuteFailureDisposition(rows.at(0)?.status);
+      if (disposition === 'unclaim') {
         await unclaimWork(input.sql, item.kind, item.key, message);
+        return;
+      }
+      if (disposition === 'hold') {
+        await holdWork(input.sql, item.kind, item.key, message);
         return;
       }
     }
