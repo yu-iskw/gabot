@@ -1,0 +1,97 @@
+import { createLocalAgentIdentity, createStaticRegistry } from '@gabot/common';
+import { serve } from '@hono/node-server';
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+
+import { createApiApp } from './app.js';
+import { createFirebasePeopleAuth } from './auth.js';
+import { createHttpSandbox } from './http-sandbox.js';
+import { createSql, PostgresStore } from './store/postgres-store.js';
+import { createHttpAgentRunner } from './turns.js';
+
+// Cloud Run: gabot-api is a plain service. Do not set --functional-type; it is
+// immutable and this process is a gateway, not an agent.
+
+const port = Number.parseInt(process.env.PORT ?? '3001', 10);
+const databaseUrl = required(process.env.DATABASE_URL, 'DATABASE_URL');
+const sql = createSql(databaseUrl);
+const store = new PostgresStore(sql);
+const peopleAuth = createFirebasePeopleAuth(process.env.FIREBASE_PROJECT_ID ?? 'demo-gabot');
+const sandbox = createHttpSandbox(
+  required(process.env.COMPUTER_URL, 'COMPUTER_URL'),
+  required(process.env.COMPUTER_TOKEN, 'COMPUTER_TOKEN'),
+);
+const agent = createHttpAgentRunner(required(process.env.AGENT_URL, 'AGENT_URL'));
+const adminEmails = (process.env.INITIAL_ADMIN_EMAILS ?? 'admin@example.com')
+  .split(',')
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean);
+
+const identity = createLocalAgentIdentity(
+  process.env.GABOT_IDENTITY_SECRET ?? 'gabot-dev-identity-secret',
+);
+const registry = createStaticRegistry([
+  {
+    id: 'general-assistant',
+    kind: 'agent',
+    url: process.env.AGENT_URL ?? 'http://agent:4200',
+    displayName: 'General Assistant',
+  },
+  {
+    id: 'mock',
+    kind: 'mcp-server',
+    url: process.env.MCP_MOCK_URL ?? 'http://mcp-mock:4300',
+    displayName: 'Mock MCP',
+  },
+]);
+console.info(`gabot-api identity ${identity.principal('gabot-api')}`);
+console.info(
+  `gabot-api registry ${registry
+    .list()
+    .map((entry) => entry.id)
+    .join(',')}`,
+);
+
+await ensureEmulatorAdmin();
+
+const app = createApiApp({
+  store,
+  peopleAuth,
+  sandbox,
+  agent,
+  mcpUrl: process.env.MCP_MOCK_URL ?? 'http://mcp-mock:4300',
+  workerSecret: process.env.WORKER_SHARED_SECRET ?? 'gabot-dev-worker-secret',
+  adminEmails,
+});
+
+serve({ fetch: app.fetch, port });
+console.info(`gabot-api listening on ${String(port)}`);
+
+function required(value: string | undefined, name: string): string {
+  if (!value) {
+    throw new Error(`Missing ${name}`);
+  }
+  return value;
+}
+
+async function ensureEmulatorAdmin(): Promise<void> {
+  if (!process.env.FIREBASE_AUTH_EMULATOR_HOST) {
+    return;
+  }
+  if (getApps().length === 0) {
+    initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID ?? 'demo-gabot' });
+  }
+  try {
+    await getAuth().createUser({
+      email: 'admin@example.com',
+      password: 'gabot-admin-pass',
+      emailVerified: true,
+      displayName: 'Admin',
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (!message.toLowerCase().includes('already')) {
+      throw error;
+    }
+  }
+}

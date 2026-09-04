@@ -1,0 +1,14 @@
+{
+  "name": "@gabot/e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright journeys against Compose.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.1"
+  }
+}

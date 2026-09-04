@@ -1,0 +1,11 @@
+node_modules
+**/dist
+**/dist-server
+coverage
+.git
+playwright-report
+test-results
+.trunk
+.claude
+.cursor
+*.md

@@ -31,7 +31,11 @@ const importXSettings = {
   'import-x/resolver': {
     typescript: {
       alwaysTryTypes: true,
-      project: ['packages/*/tsconfig.json'],
+      project: [
+        'packages/*/tsconfig.json',
+        'packages/*/tsconfig.server.json',
+        'packages/*/tsconfig.build.json',
+      ],
     },
     node: true,
   },
@@ -104,7 +108,8 @@ export default [
       '**/node_modules/**',
       '.pnpm-store/**',
       '**/dist/**',
-      '**/dist-serve/**',
+      '**/dist-server/**',
+      'packages/app/server/**',
       '**/coverage/**',
       '.claude/**',
       '.cursor/**',
@@ -221,6 +226,25 @@ export default [
     rules: {
       ...securityRecommended.rules,
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    files: ['tests/**/*.ts', 'e2e/**/*.ts'],
+    languageOptions: {
+      parser: tsparser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+      },
+    },
+    plugins: {
+      ...importXPlugins,
+      unicorn,
+    },
+    settings: importXSettings,
+    rules: {
+      ...importXRules,
+      'unicorn/filename-case': unicornFilenameCase,
     },
   },
 ];
