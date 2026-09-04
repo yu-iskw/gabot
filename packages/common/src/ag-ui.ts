@@ -1,4 +1,4 @@
-export type AguiRole = 'assistant';
+type AguiRole = 'assistant';
 
 export type AguiEvent =
   | { type: 'RUN_STARTED'; threadId: string; runId: string }

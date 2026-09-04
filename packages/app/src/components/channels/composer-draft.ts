@@ -18,7 +18,7 @@ type ComposerDraft = {
   text: string;
 };
 
-export type CommandKind = 'action' | 'chip' | 'prompt';
+type CommandKind = 'action' | 'chip' | 'prompt';
 
 export type CommandOption = {
   description?: string;
