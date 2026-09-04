@@ -333,6 +333,23 @@ WHERE channel_id = 'general';
 DELETE FROM channel_participants WHERE channel_id = 'general';
 DELETE FROM channel_memberships WHERE channel_id = 'general';
 DELETE FROM channel_agents WHERE channel_id = 'general';
+
+INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+SELECT channel_id, 'user', user_id, 'member' FROM channel_memberships
+ON CONFLICT DO NOTHING;
+
+INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+SELECT channel_id, 'bot', agent_id, 'bot' FROM channel_agents
+ON CONFLICT DO NOTHING;
+
+UPDATE channels AS c
+SET project_id = 'proj-' || first_member.user_id
+FROM (
+  SELECT DISTINCT ON (channel_id) channel_id, user_id
+  FROM channel_memberships
+  ORDER BY channel_id, created_at
+) AS first_member
+WHERE c.id = first_member.channel_id AND c.project_id IS NULL;
 `;
 
 export const SEED_SQL = `

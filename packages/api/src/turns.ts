@@ -1,4 +1,5 @@
 import {
+  botIdentityContent,
   collectText,
   collectToolCalls,
   decideScriptedTurn,
@@ -75,20 +76,28 @@ const OFFERED_TOOLS = TURN_TOOLS.map((tool) => ({
   parameters: { ...tool.parameters },
 }));
 
+class TurnClientError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'TurnClientError';
+  }
+}
+
 export function isTurnClientError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes('is not a participant') || message.includes('not in a workspace');
+  return error instanceof TurnClientError;
 }
 
 export async function executeTurn(input: TurnInput): Promise<TurnResult> {
   const botId = input.botId ?? mentionedBotId(input.message) ?? PROTECTED_AGENT_ID;
-  const scope = await input.store.getChannelScope(input.channelId);
+  const [scope, participating] = await Promise.all([
+    input.store.getChannelScope(input.channelId),
+    input.store.isChannelParticipant(input.channelId, 'bot', botId),
+  ]);
   if (!scope) {
-    throw new Error(`Channel ${input.channelId} is not in a workspace project.`);
+    throw new TurnClientError(`Channel ${input.channelId} is not in a workspace project.`);
   }
-  const participating = await input.store.isChannelParticipant(input.channelId, 'bot', botId);
   if (!participating) {
-    throw new Error(`Bot ${botId} is not a participant on channel ${input.channelId}.`);
+    throw new TurnClientError(`Bot ${botId} is not a participant on channel ${input.channelId}.`);
   }
   const run = await input.store.createRun({
     workspaceId: scope.workspaceId,
@@ -143,7 +152,7 @@ export async function executeRun(input: {
   if (!run) {
     throw new Error(`Run ${input.runId} not found.`);
   }
-  if (run.status === 'succeeded' || run.status === 'cancelled' || run.status === 'running') {
+  if (run.status === 'succeeded' || run.status === 'cancelled') {
     return { runId: run.id, text: '', toolNames: [] };
   }
   await input.store.updateRunStatus(run.id, 'running');
@@ -226,7 +235,7 @@ async function messagesForRun(
   store: GabotStore,
   run: RunRecord,
 ): Promise<AguiRunInput['messages']> {
-  const identity = { role: 'system' as const, content: `You are ${run.botId}.` };
+  const identity = { role: 'system' as const, content: botIdentityContent(run.botId) };
   if (run.parentRunId) {
     return [identity, { role: 'user', content: run.objective }];
   }

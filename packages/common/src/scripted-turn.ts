@@ -1,3 +1,4 @@
+import { botIdentityContent } from './tenancy.js';
 import {
   COMPONENT_NOTE,
   COMPUTER_NAVIGATE,
@@ -27,17 +28,16 @@ export function decideScriptedTurn(messages: ChatMessage[], botId?: string): Mod
 }
 
 function identityBotId(messages: ChatMessage[]): string | undefined {
-  const prefix = 'You are ';
+  const prefix = botIdentityContent('').slice(0, -1);
   for (const message of messages) {
     if (message.role !== 'system' || !message.content.startsWith(prefix)) {
       continue;
     }
     const rest = message.content.slice(prefix.length);
-    const dot = rest.indexOf('.');
-    if (dot <= 0) {
+    if (!rest.endsWith('.')) {
       continue;
     }
-    const id = rest.slice(0, dot).trim();
+    const id = rest.slice(0, -1).trim();
     if (id.length > 0) {
       return id;
     }

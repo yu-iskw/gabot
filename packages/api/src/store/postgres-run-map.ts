@@ -1,4 +1,4 @@
-import { cloneAuthority } from '@gabot/common';
+import { asRecord, asStringArray, cloneAuthority } from '@gabot/common';
 
 import type { RunRecord, RunStatus } from './types.js';
 import type { AuthorityEnvelope } from '@gabot/common';
@@ -25,13 +25,7 @@ export type DbRun = {
 export function parseEnvelope(value: AuthorityEnvelope | string): AuthorityEnvelope {
   if (typeof value === 'string') {
     const parsed: unknown = JSON.parse(value);
-    if (typeof parsed === 'object' && parsed !== null && 'allowedTools' in parsed) {
-      const tools = (parsed as { allowedTools?: unknown }).allowedTools;
-      return {
-        allowedTools: Array.isArray(tools) ? tools.filter((item) => typeof item === 'string') : [],
-      };
-    }
-    return { allowedTools: [] };
+    return { allowedTools: asStringArray(asRecord(parsed).allowedTools) };
   }
   return cloneAuthority(value);
 }

@@ -1,7 +1,7 @@
 import {
   ASK_PERSON,
+  asString,
   asStringArray,
-  assertDelegationBudget,
   attenuateAuthority,
   COMPONENT_NOTE,
   COMPUTER_NAVIGATE,
@@ -16,6 +16,8 @@ import {
   runMayInvoke,
   UPDATE_ROUTINE,
 } from '@gabot/common';
+
+import { DelegationBudgetError } from './store/types.js';
 
 import type { GabotStore, RoutinePatch, RunRecord } from './store/types.js';
 import type { ComputerActionResult, PolicyContext, SandboxPort } from '@gabot/common';
@@ -52,7 +54,7 @@ export async function runGatewayAction(input: GatewayInput): Promise<GatewayResu
     return { ok: false, reason: message, matched: 'authority', output: message };
   }
   const policy = await input.store.getPolicy();
-  const url = stringArg(input.args.url) || input.pageUrl || '';
+  const url = asString(input.args.url) || input.pageUrl || '';
   const context = policyContext(input, url);
   const decision = evaluateActionPolicy(policy, context);
 
@@ -118,7 +120,7 @@ async function runNavigate(
   matched: string | null,
   reason: string,
 ): Promise<GatewayResult> {
-  const url = stringArg(input.args.url);
+  const url = asString(input.args.url);
   if (!url) {
     return { ok: false, reason: 'url is required', matched, output: 'url is required' };
   }
@@ -154,7 +156,7 @@ async function runMcp(
     await writeAudit(input, 'mcp.refused', { tool: 'echo', server: 'mock', reason: message });
     return { ok: false, reason: message, matched: 'grant', output: message };
   }
-  const text = stringArg(input.args.text) || 'hello';
+  const text = asString(input.args.text) || 'hello';
   const response = await fetch(`${input.mcpUrl.replace(/\/$/, '')}/mcp`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -182,8 +184,8 @@ async function runComponent(
     await writeAudit(input, 'component.refused', { tool: COMPONENT_NOTE });
     return { ok: false, reason: message, matched: 'grant', output: message };
   }
-  const title = stringArg(input.args.title) || 'Note';
-  const body = stringArg(input.args.body) || '';
+  const title = asString(input.args.title) || 'Note';
+  const body = asString(input.args.body) || '';
   await writeAudit(input, 'component.rendered', { title });
   return { ok: true, reason, matched, output: `Note: ${title} ${body}`.trim() };
 }
@@ -193,7 +195,7 @@ async function runHandoff(
   matched: string | null,
   reason: string,
 ): Promise<GatewayResult> {
-  const prompt = stringArg(input.args.prompt) || 'Need a person.';
+  const prompt = asString(input.args.prompt) || 'Need a person.';
   await input.store.enqueueWork({
     kind: 'handoff',
     key: `${input.botId}:${Date.now()}`,
@@ -208,10 +210,10 @@ async function runCreateBot(
   matched: string | null,
   reason: string,
 ): Promise<GatewayResult> {
-  const name = stringArg(input.args.name) || stringArg(input.args.title) || 'New coworker';
-  const title = stringArg(input.args.title) || name;
+  const name = asString(input.args.name) || asString(input.args.title) || 'New coworker';
+  const title = asString(input.args.title) || name;
   const roleDescription =
-    stringArg(input.args.roleDescription) || 'Created by a bot in conversation.';
+    asString(input.args.roleDescription) || 'Created by a bot in conversation.';
   const profile = await input.store.createAgent({ name, title, roleDescription });
   if (input.channelId) {
     await input.store.addChannelParticipant({
@@ -235,7 +237,7 @@ async function runCreateRoutine(
   matched: string | null,
   reason: string,
 ): Promise<GatewayResult> {
-  const instruction = stringArg(input.args.instruction);
+  const instruction = asString(input.args.instruction);
   if (!instruction) {
     return {
       ok: false,
@@ -244,8 +246,8 @@ async function runCreateRoutine(
       output: 'instruction is required',
     };
   }
-  const cron = stringArg(input.args.cron) || '0 * * * *';
-  const timezone = stringArg(input.args.timezone) || 'UTC';
+  const cron = asString(input.args.cron) || '0 * * * *';
+  const timezone = asString(input.args.timezone) || 'UTC';
   const channelId = input.channelId;
   if (!channelId) {
     return {
@@ -278,7 +280,7 @@ async function runUpdateRoutine(
   matched: string | null,
   reason: string,
 ): Promise<GatewayResult> {
-  const idOrMatch = stringArg(input.args.id);
+  const idOrMatch = asString(input.args.id);
   if (!idOrMatch) {
     return { ok: false, reason: 'id is required', matched, output: 'id is required' };
   }
@@ -296,15 +298,15 @@ async function runUpdateRoutine(
     };
   }
   const patch: RoutinePatch = {};
-  const instruction = stringArg(input.args.instruction);
+  const instruction = asString(input.args.instruction);
   if (instruction) {
     patch.instruction = instruction;
   }
-  const cron = stringArg(input.args.cron);
+  const cron = asString(input.args.cron);
   if (cron) {
     patch.cron = cron;
   }
-  const timezone = stringArg(input.args.timezone);
+  const timezone = asString(input.args.timezone);
   if (timezone) {
     patch.timezone = timezone;
   }
@@ -344,8 +346,8 @@ async function runDelegate(
 ): Promise<GatewayResult> {
   const parent = input.run;
   const channelId = input.channelId;
-  const toBotId = stringArg(input.args.botId);
-  const objective = stringArg(input.args.objective);
+  const toBotId = asString(input.args.botId);
+  const objective = asString(input.args.objective);
   if (!parent || !channelId) {
     const message = 'Delegation requires a durable run and channel.';
     return { ok: false, reason: message, matched, output: message };
@@ -360,19 +362,6 @@ async function runDelegate(
     await writeAudit(input, TOOL_DENIED, { tool: DELEGATE_TO_BOT, reason: message });
     return { ok: false, reason: message, matched: 'participant', output: message };
   }
-  const [childCount, rootRunCount] = await Promise.all([
-    input.store.countChildRuns(parent.id),
-    input.store.countRunsForRoot(parent.rootRunId),
-  ]);
-  const budget = assertDelegationBudget({
-    depth: parent.depth,
-    childCount,
-    rootRunCount,
-  });
-  if (!budget.ok) {
-    await writeAudit(input, TOOL_DENIED, { tool: DELEGATE_TO_BOT, reason: budget.reason });
-    return { ok: false, reason: budget.reason, matched: 'budget', output: budget.reason };
-  }
   const requested = capabilityArgs(input.args.requestedCapabilities);
   const attenuated = attenuateAuthority(parent.authority, requested);
   if (!attenuated.ok) {
@@ -384,53 +373,34 @@ async function runDelegate(
       output: attenuated.reason,
     };
   }
-  const child = await input.store.createRun({
-    workspaceId: parent.workspaceId,
-    projectId: parent.projectId,
-    channelId,
-    parentRunId: parent.id,
-    rootRunId: parent.rootRunId,
-    botId: toBotId,
-    ownerUserId: parent.ownerUserId,
-    triggerType: 'delegation',
-    status: 'queued',
-    objective,
-    authority: attenuated.envelope,
-    depth: parent.depth + 1,
-  });
-  await input.store.createDelegation({
-    parentRunId: parent.id,
-    childRunId: child.id,
-    fromBotId: parent.botId,
-    toBotId,
-    objective,
-    requestedCapabilities: requested,
-    authorityEnvelope: attenuated.envelope,
-  });
-  await input.store.enqueueWork({
-    kind: 'run.execute',
-    key: child.id,
-    payload: { runId: child.id },
-  });
-  await input.store.appendChannelEvent({
-    channelId,
-    runId: child.id,
-    type: 'agent.delegation.requested',
-    actorType: 'bot',
-    actorId: parent.botId,
-    payload: { toBotId, objective, parentRunId: parent.id },
-  });
-  await writeAudit(input, 'run.delegated', {
-    childRunId: child.id,
-    toBotId,
-    parentRunId: parent.id,
-  });
-  return {
-    ok: true,
-    reason,
-    matched,
-    output: `Delegated to @${toBotId}.`,
-  };
+  try {
+    const child = await input.store.createDelegatedChild({
+      parent,
+      channelId,
+      fromBotId: parent.botId,
+      toBotId,
+      objective,
+      requestedCapabilities: requested,
+      authority: attenuated.envelope,
+    });
+    await writeAudit(input, 'run.delegated', {
+      childRunId: child.id,
+      toBotId,
+      parentRunId: parent.id,
+    });
+    return {
+      ok: true,
+      reason,
+      matched,
+      output: `Delegated to @${toBotId}.`,
+    };
+  } catch (error) {
+    if (error instanceof DelegationBudgetError) {
+      await writeAudit(input, TOOL_DENIED, { tool: DELEGATE_TO_BOT, reason: error.message });
+      return { ok: false, reason: error.message, matched: 'budget', output: error.message };
+    }
+    throw error;
+  }
 }
 
 async function writeAudit(
@@ -454,18 +424,11 @@ async function writeAudit(
   });
 }
 
-function stringArg(value: unknown): string {
-  return typeof value === 'string' ? value : '';
-}
-
 function capabilityArgs(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.filter((item) => typeof item === 'string');
-  }
   if (typeof value === 'string' && value.length > 0) {
     return asStringArray(value.split(',').map((item) => item.trim()));
   }
-  return [];
+  return asStringArray(value);
 }
 
 function boolArg(value: unknown): boolean | undefined {

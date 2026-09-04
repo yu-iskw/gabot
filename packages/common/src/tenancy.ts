@@ -67,6 +67,10 @@ export function mentionedBotId(message: string): string | undefined {
   return match?.[1]?.toLowerCase();
 }
 
+export function botIdentityContent(botId: string): string {
+  return `You are ${botId}.`;
+}
+
 export function defaultChannelParticipants(
   channelId: string,
   userId: string,

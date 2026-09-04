@@ -11,6 +11,7 @@ import {
 } from '@gabot/common';
 import postgres from 'postgres';
 
+import { insertDelegatedChild } from './postgres-delegation.js';
 import { parseEnvelope, toRunRecord, type DbRun } from './postgres-run-map.js';
 import { PROTECTED_AGENT_ID } from './types.js';
 
@@ -23,6 +24,7 @@ import type {
   ChannelParticipant,
   ChannelRecord,
   ChannelScope,
+  DelegatedChildInput,
   DelegationRecord,
   GabotStore,
   GrantRecord,
@@ -79,8 +81,8 @@ export class PostgresStore implements GabotStore {
     return await this.sql<ChannelRecord[]>`
       SELECT c.id, c.name, c.description, c.last_message AS "lastMessage"
       FROM channels c
-      JOIN channel_memberships m ON m.channel_id = c.id
-      WHERE m.user_id = ${userId}
+      JOIN channel_participants p ON p.channel_id = c.id
+      WHERE p.principal_type = 'user' AND p.principal_id = ${userId}
       ORDER BY c.created_at
     `;
   }
@@ -89,8 +91,8 @@ export class PostgresStore implements GabotStore {
     const rows = await this.sql<ChannelRecord[]>`
       SELECT c.id, c.name, c.description, c.last_message AS "lastMessage"
       FROM channels c
-      JOIN channel_memberships m ON m.channel_id = c.id
-      WHERE c.id = ${channelId} AND m.user_id = ${userId}
+      JOIN channel_participants p ON p.channel_id = c.id
+      WHERE c.id = ${channelId} AND p.principal_type = 'user' AND p.principal_id = ${userId}
     `;
     return rows.at(0) ?? null;
   }
@@ -266,19 +268,19 @@ export class PostgresStore implements GabotStore {
     `;
   }
 
-  public async claimWork(workerId: string, limit: number, _now?: Date): Promise<WorkRecord[]> {
+  public async claimWork(workerId: string, limit: number, now = new Date()): Promise<WorkRecord[]> {
     return this.sql<WorkRecord[]>`
       UPDATE work_items AS w
       SET claimed_by = ${workerId},
-          lease_until = now() + interval '5 minutes',
+          lease_until = ${now} + interval '5 minutes',
           attempts = w.attempts + 1,
           updated_at = now()
       FROM (
         SELECT kind, key
         FROM work_items
         WHERE finished_at IS NULL
-          AND run_at <= now()
-          AND (claimed_by IS NULL OR lease_until < now())
+          AND run_at <= ${now}
+          AND (claimed_by IS NULL OR lease_until < ${now})
         ORDER BY run_at
         FOR UPDATE SKIP LOCKED
         LIMIT ${limit}
@@ -677,21 +679,6 @@ export class PostgresStore implements GabotStore {
       VALUES (${input.channelId}, ${input.principalType}, ${input.principalId}, ${input.role})
       ON CONFLICT DO NOTHING
     `;
-    if (input.principalType === 'user') {
-      await this.sql`
-        INSERT INTO channel_memberships (channel_id, user_id)
-        VALUES (${input.channelId}, ${input.principalId})
-        ON CONFLICT DO NOTHING
-      `;
-    }
-    if (input.principalType === 'bot') {
-      await this.sql`
-        INSERT INTO channel_agents (channel_id, agent_id)
-        SELECT ${input.channelId}, ${input.principalId}
-        WHERE EXISTS (SELECT 1 FROM agents WHERE id = ${input.principalId})
-        ON CONFLICT DO NOTHING
-      `;
-    }
   }
 
   public async appendChannelEvent(input: {
@@ -903,6 +890,10 @@ export class PostgresStore implements GabotStore {
     };
   }
 
+  public async createDelegatedChild(input: DelegatedChildInput): Promise<RunRecord> {
+    return insertDelegatedChild(this.sql, input);
+  }
+
   public async listDelegationsForParent(parentRunId: string): Promise<DelegationRecord[]> {
     const rows = await this.sql<
       {
@@ -938,31 +929,36 @@ export class PostgresStore implements GabotStore {
     const workspaceId = personalWorkspaceId(user.id);
     const projectId = personalProjectId(user.id);
     const channelId = personalChannelId(user.id);
-    await this.sql`
-      INSERT INTO organizations (id, name) VALUES (${PLATFORM_ORG_ID}, 'gabot')
-      ON CONFLICT (id) DO NOTHING
+    const existing = await this.sql<{ id: string }[]>`
+      SELECT id FROM workspaces WHERE id = ${workspaceId}
     `;
-    const orgRole = user.isAdmin ? 'admin' : 'member';
-    await this.sql`
-      INSERT INTO organization_members (organization_id, user_id, role)
-      VALUES (${PLATFORM_ORG_ID}, ${user.id}, ${orgRole})
-      ON CONFLICT DO NOTHING
-    `;
-    await this.sql`
-      INSERT INTO workspaces (id, organization_id, owner_user_id, name)
-      VALUES (${workspaceId}, ${PLATFORM_ORG_ID}, ${user.id}, ${`${user.name}'s workspace`})
-      ON CONFLICT (id) DO NOTHING
-    `;
-    await this.sql`
-      INSERT INTO projects (id, workspace_id, name)
-      VALUES (${projectId}, ${workspaceId}, 'Default')
-      ON CONFLICT (id) DO NOTHING
-    `;
-    await this.sql`
-      INSERT INTO channels (id, name, description, project_id)
-      VALUES (${channelId}, ${DEFAULT_CHANNEL_NAME}, 'Default coworker channel', ${projectId})
-      ON CONFLICT (id) DO NOTHING
-    `;
+    if (existing.length === 0) {
+      await this.sql`
+        INSERT INTO organizations (id, name) VALUES (${PLATFORM_ORG_ID}, 'gabot')
+        ON CONFLICT (id) DO NOTHING
+      `;
+      const orgRole = user.isAdmin ? 'admin' : 'member';
+      await this.sql`
+        INSERT INTO organization_members (organization_id, user_id, role)
+        VALUES (${PLATFORM_ORG_ID}, ${user.id}, ${orgRole})
+        ON CONFLICT DO NOTHING
+      `;
+      await this.sql`
+        INSERT INTO workspaces (id, organization_id, owner_user_id, name)
+        VALUES (${workspaceId}, ${PLATFORM_ORG_ID}, ${user.id}, ${`${user.name}'s workspace`})
+        ON CONFLICT (id) DO NOTHING
+      `;
+      await this.sql`
+        INSERT INTO projects (id, workspace_id, name)
+        VALUES (${projectId}, ${workspaceId}, 'Default')
+        ON CONFLICT (id) DO NOTHING
+      `;
+      await this.sql`
+        INSERT INTO channels (id, name, description, project_id)
+        VALUES (${channelId}, ${DEFAULT_CHANNEL_NAME}, 'Default coworker channel', ${projectId})
+        ON CONFLICT (id) DO NOTHING
+      `;
+    }
     await this.retireSharedGeneral(user.id);
     await this.attachChannelParties(channelId, user.id);
   }

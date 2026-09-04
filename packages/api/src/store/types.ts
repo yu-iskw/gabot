@@ -180,6 +180,23 @@ export type DelegationRecord = {
   toBotId: string;
 };
 
+export type DelegatedChildInput = {
+  authority: AuthorityEnvelope;
+  channelId: string;
+  fromBotId: string;
+  objective: string;
+  parent: RunRecord;
+  requestedCapabilities: string[];
+  toBotId: string;
+};
+
+export class DelegationBudgetError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'DelegationBudgetError';
+  }
+}
+
 export type GabotStore = {
   upsertUser(person: VerifiedPerson, adminEmails: string[]): Promise<SessionUser>;
   listChannels(userId: string): Promise<ChannelRecord[]>;
@@ -312,6 +329,7 @@ export type GabotStore = {
     requestedCapabilities: string[];
     toBotId: string;
   }): Promise<DelegationRecord>;
+  createDelegatedChild(input: DelegatedChildInput): Promise<RunRecord>;
   listDelegationsForParent(parentRunId: string): Promise<DelegationRecord[]>;
 };
 

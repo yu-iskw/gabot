@@ -100,11 +100,7 @@ export async function deliverRoutine(
   apiUrl: string,
   secret: string,
 ): Promise<void> {
-  await fetch(`${apiUrl.replace(/\/$/, '')}/api/internal/routines/run`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': secret },
-    body: JSON.stringify(item.payload),
-  });
+  await postInternal(apiUrl, '/api/internal/routines/run', secret, item.payload);
 }
 
 export async function deliverRun(
@@ -113,14 +109,23 @@ export async function deliverRun(
   secret: string,
 ): Promise<void> {
   const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
-  const response = await fetch(`${apiUrl.replace(/\/$/, '')}/api/internal/runs/execute`, {
+  await postInternal(apiUrl, '/api/internal/runs/execute', secret, { runId });
+}
+
+async function postInternal(
+  apiUrl: string,
+  path: string,
+  secret: string,
+  body: unknown,
+): Promise<void> {
+  const response = await fetch(`${apiUrl.replace(/\/$/, '')}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': secret },
-    body: JSON.stringify({ runId }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const payload = (await response.json().catch(() => ({}))) as { error?: string };
-    throw new Error(payload.error ?? `run execute HTTP ${String(response.status)}`);
+    throw new Error(payload.error ?? `HTTP ${String(response.status)}`);
   }
 }
 

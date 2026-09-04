@@ -75,14 +75,16 @@ export function ChannelPage({
       readTurnStream(`/api/channels/${channelId}/turns`, await token(), input.message, input.botId),
     onSuccess: async (text) => {
       setReply(text);
-      await queryClient.invalidateQueries({ queryKey: ['messages'] });
-      await queryClient.invalidateQueries({ queryKey: ['events'] });
-      await queryClient.invalidateQueries({ queryKey: ['participants'] });
-      await queryClient.invalidateQueries({ queryKey: ['audit'] });
-      await queryClient.invalidateQueries({ queryKey: ['channels'] });
-      await queryClient.invalidateQueries({ queryKey: ['screenshot'] });
-      await queryClient.invalidateQueries({ queryKey: ['agents'] });
-      await queryClient.invalidateQueries({ queryKey: ['routines'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['messages'] }),
+        queryClient.invalidateQueries({ queryKey: ['events'] }),
+        queryClient.invalidateQueries({ queryKey: ['participants'] }),
+        queryClient.invalidateQueries({ queryKey: ['audit'] }),
+        queryClient.invalidateQueries({ queryKey: ['channels'] }),
+        queryClient.invalidateQueries({ queryKey: ['screenshot'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents'] }),
+        queryClient.invalidateQueries({ queryKey: ['routines'] }),
+      ]);
     },
   });
 
@@ -118,9 +120,7 @@ export function ChannelPage({
 }
 
 function watchBotId(messages: Array<{ agentId: string | null; role: string }>): string {
-  const last = [...messages]
-    .reverse()
-    .find((message) => message.role === 'assistant' && message.agentId);
+  const last = messages.findLast((message) => message.role === 'assistant' && message.agentId);
   return last?.agentId ?? DEFAULT_BOT;
 }
 

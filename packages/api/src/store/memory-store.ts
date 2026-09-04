@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  assertDelegationBudget,
+  asString,
   cloneAuthority,
   DEFAULT_ALLOW_POLICY,
   DEFAULT_CHANNEL_NAME,
@@ -13,7 +15,7 @@ import {
   TEAM_BOT_PROFILES,
 } from '@gabot/common';
 
-import { PROTECTED_AGENT_ID } from './types.js';
+import { DelegationBudgetError, PROTECTED_AGENT_ID } from './types.js';
 
 import type {
   AgentPatch,
@@ -24,6 +26,7 @@ import type {
   ChannelParticipant,
   ChannelRecord,
   ChannelScope,
+  DelegatedChildInput,
   DelegationRecord,
   GabotStore,
   GrantRecord,
@@ -45,8 +48,6 @@ import type { ActionPolicy, AuthorityEnvelope, VerifiedPerson } from '@gabot/com
 /* eslint-disable @typescript-eslint/require-await -- GabotStore is async for Postgres. */
 
 type UserRow = SessionUser;
-type Membership = { channelId: string; userId: string };
-type ChannelAgent = { agentId: string; channelId: string };
 type ThreadRow = { userId: string; channelId: string; threadId: string };
 type GrantRow = { kind: string; ref: string; agentId: string };
 type WorkRow = WorkRecord & {
@@ -66,14 +67,10 @@ type WorkspaceRow = {
   projectId: string;
 };
 
-const TEAM_BOTS: AgentProfile[] = TEAM_BOT_PROFILES.map((bot) => ({ ...bot }));
-
 export class MemoryStore implements GabotStore {
   private readonly users = new Map<string, UserRow>();
   private readonly workspaces = new Map<string, WorkspaceRow>();
   private readonly channels = new Map<string, ChannelRow>();
-  private readonly memberships: Membership[] = [];
-  private readonly channelAgents: ChannelAgent[] = [];
   private readonly participants: ChannelParticipant[] = [];
   private readonly events: ChannelEventRecord[] = [];
   private readonly runs = new Map<string, RunRecord>();
@@ -86,7 +83,7 @@ export class MemoryStore implements GabotStore {
   ];
   private readonly work: WorkRow[] = [];
   private readonly routines: RoutineRow[] = [];
-  private readonly agents: AgentProfile[] = TEAM_BOTS.map((bot) => ({ ...bot }));
+  private readonly agents: AgentProfile[] = TEAM_BOT_PROFILES.map((bot) => ({ ...bot }));
   private readonly skills: SkillRecord[] = [
     {
       id: 'brief',
@@ -130,14 +127,17 @@ export class MemoryStore implements GabotStore {
 
   public async listChannels(userId: string): Promise<ChannelRecord[]> {
     const ids = new Set(
-      this.memberships.filter((row) => row.userId === userId).map((row) => row.channelId),
+      this.participants
+        .filter((row) => row.principalType === 'user' && row.principalId === userId)
+        .map((row) => row.channelId),
     );
     return [...this.channels.values()].filter((channel) => ids.has(channel.id));
   }
 
   public async getChannel(channelId: string, userId: string): Promise<ChannelRecord | null> {
-    const allowed = this.memberships.some(
-      (row) => row.channelId === channelId && row.userId === userId,
+    const allowed = this.participants.some(
+      (row) =>
+        row.channelId === channelId && row.principalType === 'user' && row.principalId === userId,
     );
     return allowed ? (this.channels.get(channelId) ?? null) : null;
   }
@@ -549,6 +549,55 @@ export class MemoryStore implements GabotStore {
     };
   }
 
+  public async createDelegatedChild(input: DelegatedChildInput): Promise<RunRecord> {
+    const parent = input.parent;
+    const budget = assertDelegationBudget({
+      depth: parent.depth,
+      childCount: await this.countChildRuns(parent.id),
+      rootRunCount: await this.countRunsForRoot(parent.rootRunId),
+    });
+    if (!budget.ok) {
+      throw new DelegationBudgetError(budget.reason);
+    }
+    const child = await this.createRun({
+      workspaceId: parent.workspaceId,
+      projectId: parent.projectId,
+      channelId: input.channelId,
+      parentRunId: parent.id,
+      rootRunId: parent.rootRunId,
+      botId: input.toBotId,
+      ownerUserId: parent.ownerUserId,
+      triggerType: 'delegation',
+      status: 'queued',
+      objective: input.objective,
+      authority: input.authority,
+      depth: parent.depth + 1,
+    });
+    await this.createDelegation({
+      parentRunId: parent.id,
+      childRunId: child.id,
+      fromBotId: input.fromBotId,
+      toBotId: input.toBotId,
+      objective: input.objective,
+      requestedCapabilities: input.requestedCapabilities,
+      authorityEnvelope: input.authority,
+    });
+    await this.enqueueWork({
+      kind: 'run.execute',
+      key: child.id,
+      payload: { runId: child.id },
+    });
+    await this.appendChannelEvent({
+      channelId: input.channelId,
+      runId: child.id,
+      type: 'agent.delegation.requested',
+      actorType: 'bot',
+      actorId: input.fromBotId,
+      payload: { toBotId: input.toBotId, objective: input.objective, parentRunId: parent.id },
+    });
+    return child;
+  }
+
   public async listDelegationsForParent(parentRunId: string): Promise<DelegationRecord[]> {
     return this.delegations
       .filter((row) => row.parentRunId === parentRunId)
@@ -736,24 +785,6 @@ export class MemoryStore implements GabotStore {
     if (!exists) {
       this.participants.push({ ...input });
     }
-    if (input.principalType === 'user') {
-      if (
-        !this.memberships.some(
-          (row) => row.channelId === input.channelId && row.userId === input.principalId,
-        )
-      ) {
-        this.memberships.push({ channelId: input.channelId, userId: input.principalId });
-      }
-    }
-    if (input.principalType === 'bot') {
-      if (
-        !this.channelAgents.some(
-          (row) => row.channelId === input.channelId && row.agentId === input.principalId,
-        )
-      ) {
-        this.channelAgents.push({ channelId: input.channelId, agentId: input.principalId });
-      }
-    }
   }
 }
 
@@ -784,7 +815,7 @@ function cloneRun(row: RunRecord): RunRecord {
 }
 
 function auditInScope(row: AuditRecord, scope: AuditListScope): boolean {
-  const workspaceId = typeof row.payload.workspaceId === 'string' ? row.payload.workspaceId : '';
+  const workspaceId = asString(row.payload.workspaceId);
   if (workspaceId === scope.workspaceId) {
     return true;
   }

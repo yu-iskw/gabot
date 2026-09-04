@@ -161,6 +161,7 @@ describe('control plane', () => {
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS runs');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS organization_members');
     expect(SCHEMA_SQL).toContain("WHERE channel_id = 'general'");
+    expect(SCHEMA_SQL).toContain('FROM channel_memberships');
     expect(DEFAULT_ALLOW_POLICY.allow).toEqual(['true']);
   });
 
@@ -574,7 +575,7 @@ describe('control plane', () => {
     expect(await store.listMessages(defaultChannel)).toHaveLength(0);
   });
 
-  it('does not re-enter a running run', async () => {
+  it('resumes a running child run after a crash', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, ['admin@example.com']);
     const workspace = await store.getWorkspaceForUser(person.id);
@@ -590,7 +591,6 @@ describe('control plane', () => {
       authority: rootAuthority(['delegate_to_bot']),
       depth: 1,
     });
-    const before = await store.listMessages(defaultChannel);
     const result = await executeRun({
       store,
       sandbox: sandbox([]),
@@ -599,9 +599,8 @@ describe('control plane', () => {
       user: { ...person, isAdmin: true },
       runId: run.id,
     });
-    expect(result.text).toBe('');
-    expect((await store.getRun(run.id))?.status).toBe('running');
-    expect(await store.listMessages(defaultChannel)).toHaveLength(before.length);
+    expect(result.text).toBeDefined();
+    expect((await store.getRun(run.id))?.status).toBe('succeeded');
   });
 
   it('schedules routines on the run channel even when args include another channelId', async () => {
