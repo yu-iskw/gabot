@@ -36,7 +36,7 @@ export function parseEnvelope(value: AuthorityEnvelope | string): AuthorityEnvel
   return cloneAuthority(value);
 }
 
-export function toRunStatus(value: string): RunStatus {
+function toRunStatus(value: string): RunStatus {
   switch (value) {
     case 'queued':
     case 'running':
