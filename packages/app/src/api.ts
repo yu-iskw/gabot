@@ -19,6 +19,7 @@ export async function readTurnStream(
   path: string,
   token: string,
   message: string,
+  botId?: string | null,
 ): Promise<string> {
   const response = await fetch(`${apiBase()}${path}`, {
     method: 'POST',
@@ -26,7 +27,7 @@ export async function readTurnStream(
       authorization: `Bearer ${token}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, botId: botId || undefined }),
   });
   const payload = await response.text();
   return parseTurnSse(payload);

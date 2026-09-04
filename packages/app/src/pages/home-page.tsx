@@ -34,12 +34,20 @@ export function HomePage() {
     },
   });
   const start = useMutation({
-    mutationFn: async (message: string) => {
+    mutationFn: async (input: { botId: string | null; message: string }) => {
       const created = await apiJson<{ channel: { id: string } }>('/api/channels', await token(), {
         method: 'POST',
-        body: JSON.stringify({ name: channelNameFrom(message) }),
+        body: JSON.stringify({
+          name: channelNameFrom(input.message),
+          agentId: input.botId || undefined,
+        }),
       });
-      await readTurnStream(`/api/channels/${created.channel.id}/turns`, await token(), message);
+      await readTurnStream(
+        `/api/channels/${created.channel.id}/turns`,
+        await token(),
+        input.message,
+        input.botId,
+      );
       return created.channel.id;
     },
     onSuccess: async (channelId) => {
@@ -66,7 +74,7 @@ export function HomePage() {
             pending={start.isPending}
             placeholder="Ask anything"
             submitLabel="Start"
-            onSubmit={(message) => start.mutate(message)}
+            onSubmit={(input) => start.mutate(input)}
           />
           <p className="mt-2 w-full text-center text-xs text-muted-foreground">
             Sent to the coworker it is for. Type <code>@</code> to choose one yourself.

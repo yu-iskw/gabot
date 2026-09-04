@@ -6,6 +6,7 @@ export const ASK_PERSON = 'ask_person';
 export const CREATE_BOT = 'create_bot';
 export const CREATE_ROUTINE = 'create_routine';
 export const UPDATE_ROUTINE = 'update_routine';
+export const DELEGATE_TO_BOT = 'delegate_to_bot';
 
 export const COMPUTER_TOOLS = [
   {
@@ -100,3 +101,34 @@ export const UPDATE_ROUTINE_TOOL = {
     required: ['id'],
   },
 } as const;
+
+export const DELEGATE_TO_BOT_TOOL = {
+  name: DELEGATE_TO_BOT,
+  description:
+    'Delegate work to another bot in this channel as a durable child Run. Does not call the other bot in-process.',
+  parameters: {
+    type: 'object',
+    properties: {
+      botId: { type: 'string', description: 'Target bot id that participates in this channel' },
+      objective: { type: 'string', description: 'What the child run should accomplish' },
+      requestedCapabilities: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Tool names the child may use; must be a subset of this run authority',
+      },
+    },
+    required: ['botId', 'objective'],
+  },
+} as const;
+
+export const TURN_TOOLS = [
+  ...COMPUTER_TOOLS,
+  MCP_ECHO_TOOL,
+  COMPONENT_NOTE_TOOL,
+  CREATE_BOT_TOOL,
+  CREATE_ROUTINE_TOOL,
+  UPDATE_ROUTINE_TOOL,
+  DELEGATE_TO_BOT_TOOL,
+] as const;
+
+export const TURN_TOOL_NAMES = TURN_TOOLS.map((tool) => tool.name);

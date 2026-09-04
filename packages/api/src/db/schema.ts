@@ -1,4 +1,4 @@
-import { jsonb, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
+import { integer, jsonb, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 
@@ -37,6 +37,7 @@ export const channels = pgTable('channels', {
   description: text('description').notNull(),
   lastMessage: text('last_message'),
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
+  projectId: text('project_id'),
   createdAt: createdAt(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -92,5 +93,96 @@ export const mastraThreads = pgTable('mastra_threads', {
   resourceId: text('resource_id'),
   title: text('title'),
   metadata: jsonb('metadata'),
+  createdAt: createdAt(),
+});
+
+export const organizations = pgTable('organizations', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const organizationMembers = pgTable(
+  'organization_members',
+  {
+    organizationId: text('organization_id').notNull(),
+    userId: text('user_id').notNull(),
+    role: text('role').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [primaryKey({ columns: [table.organizationId, table.userId] })],
+);
+
+export const workspaces = pgTable('workspaces', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
+  ownerUserId: text('owner_user_id').notNull(),
+  name: text('name').notNull(),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const projects = pgTable('projects', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull(),
+  name: text('name').notNull(),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const channelParticipants = pgTable(
+  'channel_participants',
+  {
+    channelId: text('channel_id').notNull(),
+    principalType: text('principal_type').notNull(),
+    principalId: text('principal_id').notNull(),
+    role: text('role').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [primaryKey({ columns: [table.channelId, table.principalType, table.principalId] })],
+);
+
+export const channelEvents = pgTable('channel_events', {
+  id: text('id').primaryKey(),
+  channelId: text('channel_id').notNull(),
+  runId: text('run_id'),
+  type: text('type').notNull(),
+  actorType: text('actor_type').notNull(),
+  actorId: text('actor_id'),
+  payload: jsonb('payload').notNull(),
+  createdAt: createdAt(),
+});
+
+export const runs = pgTable('runs', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull(),
+  projectId: text('project_id').notNull(),
+  channelId: text('channel_id').notNull(),
+  parentRunId: text('parent_run_id'),
+  rootRunId: text('root_run_id').notNull(),
+  botId: text('bot_id').notNull(),
+  ownerUserId: text('owner_user_id').notNull(),
+  triggerType: text('trigger_type').notNull(),
+  status: text('status').notNull(),
+  objective: text('objective').notNull(),
+  authority: jsonb('authority').notNull(),
+  depth: integer('depth').notNull(),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  error: text('error'),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const delegations = pgTable('delegations', {
+  id: text('id').primaryKey(),
+  parentRunId: text('parent_run_id').notNull(),
+  childRunId: text('child_run_id').notNull(),
+  fromBotId: text('from_bot_id').notNull(),
+  toBotId: text('to_bot_id').notNull(),
+  objective: text('objective').notNull(),
+  requestedCapabilities: jsonb('requested_capabilities').notNull(),
+  authorityEnvelope: jsonb('authority_envelope').notNull(),
   createdAt: createdAt(),
 });

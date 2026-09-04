@@ -1,4 +1,9 @@
-import type { ActionPolicy, VerifiedPerson } from '@gabot/common';
+import {
+  GENERAL_ASSISTANT_ID,
+  type ActionPolicy,
+  type AuthorityEnvelope,
+  type VerifiedPerson,
+} from '@gabot/common';
 
 export type ChannelRecord = {
   id: string;
@@ -23,6 +28,11 @@ export type AuditRecord = {
   payload: Record<string, unknown>;
   createdAt: Date;
   actorUserId: string | null;
+};
+
+export type AuditListScope = {
+  actorUserId: string;
+  workspaceId: string;
 };
 
 export type WorkRecord = {
@@ -104,6 +114,87 @@ export type SessionUser = {
   isAdmin: boolean;
 };
 
+export type WorkspaceRecord = {
+  defaultChannelId: string;
+  id: string;
+  name: string;
+  organizationId: string;
+  ownerUserId: string;
+  projectId: string;
+};
+
+export type ChannelScope = {
+  channelId: string;
+  ownerUserId: string;
+  projectId: string;
+  workspaceId: string;
+};
+
+export type ChannelParticipant = {
+  channelId: string;
+  principalId: string;
+  principalType: 'bot' | 'user';
+  role: string;
+};
+
+export type ChannelEventRecord = {
+  actorId: string | null;
+  actorType: string;
+  channelId: string;
+  createdAt: Date;
+  id: string;
+  payload: Record<string, unknown>;
+  runId: string | null;
+  type: string;
+};
+
+export type RunStatus = 'cancelled' | 'failed' | 'queued' | 'running' | 'succeeded';
+
+export type RunRecord = {
+  authority: AuthorityEnvelope;
+  botId: string;
+  channelId: string;
+  depth: number;
+  error: string | null;
+  finishedAt: Date | null;
+  id: string;
+  objective: string;
+  ownerUserId: string;
+  parentRunId: string | null;
+  projectId: string;
+  rootRunId: string;
+  startedAt: Date | null;
+  status: RunStatus;
+  triggerType: string;
+  workspaceId: string;
+};
+
+export type DelegationRecord = {
+  authorityEnvelope: AuthorityEnvelope;
+  childRunId: string;
+  fromBotId: string;
+  id: string;
+  objective: string;
+  parentRunId: string;
+  requestedCapabilities: string[];
+  toBotId: string;
+};
+
+export type DelegatedChildInput = {
+  authority: AuthorityEnvelope;
+  objective: string;
+  parent: RunRecord;
+  requestedCapabilities: string[];
+  toBotId: string;
+};
+
+export class DelegationBudgetError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'DelegationBudgetError';
+  }
+}
+
 export type GabotStore = {
   upsertUser(person: VerifiedPerson, adminEmails: string[]): Promise<SessionUser>;
   listChannels(userId: string): Promise<ChannelRecord[]>;
@@ -125,7 +216,7 @@ export type GabotStore = {
     targetId?: string;
     payload: Record<string, unknown>;
   }): Promise<void>;
-  listAudit(limit: number): Promise<AuditRecord[]>;
+  listAudit(limit: number, scope?: AuditListScope): Promise<AuditRecord[]>;
   hasGrant(agentId: string, kind: string, ref: string): Promise<boolean>;
   listGrants(): Promise<GrantRecord[]>;
   listPluginTools(serverId: string): Promise<PluginTool[]>;
@@ -189,6 +280,44 @@ export type GabotStore = {
   deleteRoutine(id: string, ownerUserId: string): Promise<boolean>;
   listDueRoutines(now: Date): Promise<RoutineRecord[]>;
   markRoutineRun(routineId: string, nextRunAt: Date): Promise<void>;
+  getWorkspaceForUser(userId: string): Promise<WorkspaceRecord | null>;
+  getChannelScope(channelId: string): Promise<ChannelScope | null>;
+  listChannelParticipants(channelId: string): Promise<ChannelParticipant[]>;
+  isChannelParticipant(
+    channelId: string,
+    principalType: 'bot' | 'user',
+    principalId: string,
+  ): Promise<boolean>;
+  addChannelParticipant(input: ChannelParticipant): Promise<void>;
+  appendChannelEvent(input: {
+    actorId?: string;
+    actorType: string;
+    channelId: string;
+    payload?: Record<string, unknown>;
+    runId?: string;
+    type: string;
+  }): Promise<ChannelEventRecord>;
+  listChannelEvents(channelId: string): Promise<ChannelEventRecord[]>;
+  createRun(input: {
+    authority: AuthorityEnvelope;
+    botId: string;
+    channelId: string;
+    depth: number;
+    id?: string;
+    objective: string;
+    ownerUserId: string;
+    parentRunId?: string;
+    projectId: string;
+    rootRunId?: string;
+    status: RunStatus;
+    triggerType: string;
+    workspaceId: string;
+  }): Promise<RunRecord>;
+  getRun(runId: string): Promise<RunRecord | null>;
+  updateRunStatus(runId: string, status: RunStatus, error?: string): Promise<RunRecord | null>;
+  listRunsForChannel(channelId: string): Promise<RunRecord[]>;
+  createDelegatedChild(input: DelegatedChildInput): Promise<RunRecord>;
+  listDelegationsForParent(parentRunId: string): Promise<DelegationRecord[]>;
 };
 
-export const PROTECTED_AGENT_ID = 'general-assistant';
+export const PROTECTED_AGENT_ID = GENERAL_ASSISTANT_ID;

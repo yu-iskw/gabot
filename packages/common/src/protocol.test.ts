@@ -7,11 +7,13 @@ import { asRecord, asString, asStringArray } from './json-value.js';
 import { createOpenAiCompatibleModel, toOpenAiMessages } from './openai-model.js';
 import { runModelAsAgui } from './run-model-agui.js';
 import { decideScriptedTurn } from './scripted-turn.js';
+import { botIdentityContent } from './tenancy.js';
 import { matchesToken, offeredBearer } from './token.js';
 import {
   COMPUTER_NAVIGATE,
   CREATE_BOT,
   CREATE_ROUTINE,
+  DELEGATE_TO_BOT,
   MCP_ECHO,
   UPDATE_ROUTINE,
 } from './tool-catalog.js';
@@ -120,6 +122,37 @@ describe('decideScriptedTurn', () => {
       { role: 'user', content: 'please echo hello via mcp' },
     ]);
     expect(turn.toolCalls[0]?.name).toBe(MCP_ECHO);
+  });
+
+  it('delegates monitor production work to triage', () => {
+    const turn = decideScriptedTurn([
+      { role: 'system', content: botIdentityContent('monitor') },
+      { role: 'user', content: 'inspect production errors from the last 24 hours' },
+    ]);
+    expect(turn.toolCalls[0]?.name).toBe(DELEGATE_TO_BOT);
+    expect(turn.toolCalls[0]?.arguments.botId).toBe('triage');
+  });
+
+  it('has triage delegate to coder and coder reply in text', () => {
+    const triage = decideScriptedTurn([
+      { role: 'system', content: botIdentityContent('triage') },
+      { role: 'user', content: 'Triage production errors from the last 24 hours.' },
+    ]);
+    expect(triage.toolCalls[0]?.arguments.botId).toBe('coder');
+    const coder = decideScriptedTurn([
+      { role: 'system', content: botIdentityContent('coder') },
+      { role: 'user', content: 'Implement a fix for the triaged production issues.' },
+    ]);
+    expect(coder.text.toLowerCase()).toContain('coding');
+  });
+
+  it('prefers an explicit botId over scraping the system prompt', () => {
+    const turn = decideScriptedTurn(
+      [{ role: 'user', content: 'inspect production errors from the last 24 hours' }],
+      'monitor',
+    );
+    expect(turn.toolCalls[0]?.name).toBe(DELEGATE_TO_BOT);
+    expect(turn.toolCalls[0]?.arguments.botId).toBe('triage');
   });
 });
 

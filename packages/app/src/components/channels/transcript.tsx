@@ -13,9 +13,16 @@ import { PLACEHOLDER_COMMANDS } from './composer-sources.js';
 import { ToolLine } from './tool-line.js';
 
 type TranscriptMessage = {
+  agentId?: string | null;
   content: string;
   id: string;
   role: string;
+};
+
+type ChannelEvent = {
+  id: string;
+  payload: Record<string, unknown>;
+  type: string;
 };
 
 type SkillRow = { slug: string };
@@ -23,9 +30,11 @@ type SkillRow = { slug: string };
 const SLASH = String.fromCharCode(47);
 
 export function Transcript({
+  events = [],
   messages,
   pending,
 }: {
+  events?: ChannelEvent[];
   messages: TranscriptMessage[];
   pending: boolean;
 }) {
@@ -40,6 +49,14 @@ export function Transcript({
     <ul data-testid="messages" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-4">
       {visibleMessages(messages).map((message) => (
         <li key={message.id}>{renderMessage(message, commandNames)}</li>
+      ))}
+      {runEvents(events).map((event) => (
+        <li key={event.id}>
+          <details className="pb-3 text-xs text-muted-foreground" data-testid="channel-event">
+            <summary>{eventCaption(event)}</summary>
+            {eventDetail(event)}
+          </details>
+        </li>
       ))}
       {pending ? (
         <li>
@@ -68,7 +85,52 @@ function renderMessage(message: TranscriptMessage, commandNames: string) {
   if (message.role === 'user') {
     return <UserBubble commandNames={commandNames} text={message.content} />;
   }
-  return <AssistantProse text={message.content} />;
+  return <AssistantProse agentId={message.agentId} text={message.content} />;
+}
+
+function runEvents(events: ChannelEvent[]): ChannelEvent[] {
+  return events.filter(
+    (event) =>
+      event.type.startsWith('agent.delegation') ||
+      event.type === 'run.started' ||
+      event.type === 'run.succeeded' ||
+      event.type === 'run.failed',
+  );
+}
+
+function eventCaption(event: ChannelEvent): string {
+  if (event.type === 'agent.delegation.requested') {
+    const toBotId = event.payload.toBotId;
+    return typeof toBotId === 'string' ? `Delegated to @${toBotId}` : 'Delegated';
+  }
+  if (event.type === 'agent.delegation.completed') {
+    return 'Delegation completed';
+  }
+  if (event.type === 'agent.delegation.failed') {
+    return 'Delegation failed';
+  }
+  if (event.type === 'run.started') {
+    return 'Run started';
+  }
+  if (event.type === 'run.succeeded') {
+    return 'Run succeeded';
+  }
+  if (event.type === 'run.failed') {
+    return 'Run failed';
+  }
+  return event.type;
+}
+
+function eventDetail(event: ChannelEvent): string {
+  const objective = event.payload.objective;
+  if (typeof objective === 'string') {
+    return objective;
+  }
+  const error = event.payload.error;
+  if (typeof error === 'string') {
+    return error;
+  }
+  return event.type;
 }
 
 function UserBubble({ commandNames, text }: { commandNames: string; text: string }) {

@@ -32,6 +32,9 @@ export function captionForTool(content: string): ToolCaption {
   if (lower.startsWith('updated routine')) {
     return { label: 'Updated routine', detail: content, refused, failed };
   }
+  if (lower.startsWith('delegated')) {
+    return { label: 'Delegated', detail: content, refused, failed };
+  }
   if (lower.startsWith(OPENED_PREFIX.toLowerCase())) {
     return { label: 'Opened', detail: content.slice(OPENED_PREFIX.length), refused, failed };
   }
@@ -51,5 +54,10 @@ function firstGroup(content: string, pattern: RegExp): string | undefined {
 }
 
 function isRefused(lower: string): boolean {
-  return lower.includes('refus') || lower.includes('not granted') || lower.includes('policy');
+  return (
+    lower.includes('refus') ||
+    lower.includes('not granted') ||
+    lower.includes('not authorized') ||
+    lower.includes('policy')
+  );
 }

@@ -43,35 +43,63 @@ export function ChannelPage({
   const channelName = channels.data?.find((row) => row.id === channelId)?.name ?? 'Channel';
   const messages = useQuery({
     queryKey: ['messages', channelId],
+    refetchInterval: 2000,
     queryFn: async () => {
       const body = await apiJson<{
-        messages: Array<{ id: string; role: string; content: string }>;
+        messages: Array<{ agentId: string | null; content: string; id: string; role: string }>;
       }>(`/api/channels/${channelId}/messages`, await token());
       return body.messages;
     },
   });
+  const participants = useQuery({
+    queryKey: ['participants', channelId],
+    queryFn: async () => {
+      const body = await apiJson<{
+        participants: Array<{ principalId: string; principalType: string }>;
+      }>(`/api/channels/${channelId}/participants`, await token());
+      return body.participants;
+    },
+  });
+  const events = useQuery({
+    queryKey: ['events', channelId],
+    refetchInterval: 2000,
+    queryFn: async () => {
+      const body = await apiJson<{
+        events: Array<{ id: string; payload: Record<string, unknown>; type: string }>;
+      }>(`/api/channels/${channelId}/events`, await token());
+      return body.events;
+    },
+  });
   const send = useMutation({
-    mutationFn: async (message: string) =>
-      readTurnStream(`/api/channels/${channelId}/turns`, await token(), message),
+    mutationFn: async (input: { botId: string | null; message: string }) =>
+      readTurnStream(`/api/channels/${channelId}/turns`, await token(), input.message, input.botId),
     onSuccess: async (text) => {
       setReply(text);
-      await queryClient.invalidateQueries({ queryKey: ['messages'] });
-      await queryClient.invalidateQueries({ queryKey: ['audit'] });
-      await queryClient.invalidateQueries({ queryKey: ['channels'] });
-      await queryClient.invalidateQueries({ queryKey: ['screenshot'] });
-      await queryClient.invalidateQueries({ queryKey: ['agents'] });
-      await queryClient.invalidateQueries({ queryKey: ['routines'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['messages'] }),
+        queryClient.invalidateQueries({ queryKey: ['events'] }),
+        queryClient.invalidateQueries({ queryKey: ['participants'] }),
+        queryClient.invalidateQueries({ queryKey: ['audit'] }),
+        queryClient.invalidateQueries({ queryKey: ['channels'] }),
+        queryClient.invalidateQueries({ queryKey: ['screenshot'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents'] }),
+        queryClient.invalidateQueries({ queryKey: ['routines'] }),
+      ]);
     },
   });
 
   return (
     <DetailPanel
       open={pane !== null}
-      detail={paneDetail(pane, channelName)}
+      detail={paneDetail(pane, channelName, watchBotId(messages.data ?? []))}
       onClose={() => onPane(null)}
     >
       <ChannelHeader name={channelName} pane={pane} onPane={onPane} />
-      <Transcript messages={messages.data ?? []} pending={send.isPending} />
+      <Transcript
+        events={events.data ?? []}
+        messages={messages.data ?? []}
+        pending={send.isPending}
+      />
       <p data-testid="assistant-reply" className="sr-only">
         {reply}
       </p>
@@ -79,22 +107,30 @@ export function ChannelPage({
         <Composer
           compact
           pending={send.isPending}
+          permittedAgentIds={(participants.data ?? [])
+            .filter((row) => row.principalType === 'bot')
+            .map((row) => row.principalId)}
           placeholder="Ask anything"
           submitLabel="Send"
-          onSubmit={(message) => send.mutate(message)}
+          onSubmit={(input) => send.mutate(input)}
         />
       </div>
     </DetailPanel>
   );
 }
 
-function paneDetail(pane: ChannelPane | null, channelName: string) {
+function watchBotId(messages: Array<{ agentId: string | null; role: string }>): string {
+  const last = messages.findLast((message) => message.role === 'assistant' && message.agentId);
+  return last?.agentId ?? DEFAULT_BOT;
+}
+
+function paneDetail(pane: ChannelPane | null, channelName: string, botId: string) {
   switch (pane) {
     case 'settings': {
-      return <AgentProfile agentId={DEFAULT_BOT} />;
+      return <AgentProfile agentId={botId} />;
     }
     case 'watch': {
-      return <ComputerPanel name={channelName} />;
+      return <ComputerPanel botId={botId} name={channelName} />;
     }
     case null: {
       return null;

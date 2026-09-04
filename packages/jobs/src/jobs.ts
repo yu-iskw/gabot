@@ -38,6 +38,34 @@ async function finishWork(sql: JobSql, kind: string, key: string, error?: string
   `;
 }
 
+async function unclaimWork(sql: JobSql, kind: string, key: string, error: string): Promise<void> {
+  await sql`
+    UPDATE work_items
+    SET claimed_by = NULL, lease_until = NULL, last_error = ${error}, updated_at = now()
+    WHERE kind = ${kind} AND key = ${key} AND finished_at IS NULL
+  `;
+}
+
+async function holdWork(sql: JobSql, kind: string, key: string, error: string): Promise<void> {
+  await sql`
+    UPDATE work_items
+    SET last_error = ${error}, updated_at = now()
+    WHERE kind = ${kind} AND key = ${key} AND finished_at IS NULL
+  `;
+}
+
+export function runExecuteFailureDisposition(
+  status: string | undefined,
+): 'finish' | 'hold' | 'unclaim' {
+  if (status === 'queued') {
+    return 'unclaim';
+  }
+  if (status === 'running') {
+    return 'hold';
+  }
+  return 'finish';
+}
+
 async function enqueueDueRoutines(sql: JobSql, now = new Date()): Promise<number> {
   const routines = await sql<
     {
@@ -80,7 +108,10 @@ export async function deliverHandoff(
   apiUrl: string,
   secret: string,
 ): Promise<void> {
-  const channelId = typeof item.payload.channelId === 'string' ? item.payload.channelId : 'general';
+  const channelId = typeof item.payload.channelId === 'string' ? item.payload.channelId : '';
+  if (!channelId) {
+    throw new Error('handoff payload missing channelId');
+  }
   const prompt =
     typeof item.payload.prompt === 'string'
       ? item.payload.prompt
@@ -97,11 +128,33 @@ export async function deliverRoutine(
   apiUrl: string,
   secret: string,
 ): Promise<void> {
-  await fetch(`${apiUrl.replace(/\/$/, '')}/api/internal/routines/run`, {
+  await postInternal(apiUrl, '/api/internal/routines/run', secret, item.payload);
+}
+
+export async function deliverRun(
+  item: { key: string; payload: Record<string, unknown> },
+  apiUrl: string,
+  secret: string,
+): Promise<void> {
+  const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
+  await postInternal(apiUrl, '/api/internal/runs/execute', secret, { runId });
+}
+
+async function postInternal(
+  apiUrl: string,
+  path: string,
+  secret: string,
+  body: unknown,
+): Promise<void> {
+  const response = await fetch(`${apiUrl.replace(/\/$/, '')}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': secret },
-    body: JSON.stringify(item.payload),
+    body: JSON.stringify(body),
   });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error ?? `HTTP ${String(response.status)}`);
+  }
 }
 
 export async function runTick(input: {
@@ -118,8 +171,10 @@ export async function runTick(input: {
   return { claimed: claimed.length, routines };
 }
 
+type WorkItem = { kind: string; key: string; payload: Record<string, unknown> };
+
 async function handleItem(
-  item: { kind: string; key: string; payload: Record<string, unknown> },
+  item: WorkItem,
   input: { sql: JobSql; apiUrl: string; secret: string },
 ): Promise<void> {
   try {
@@ -135,15 +190,40 @@ async function handleItem(
         await deliverRoutine(item, input.apiUrl, input.secret);
         break;
       }
+      case 'run.execute': {
+        await deliverRun(item, input.apiUrl, input.secret);
+        break;
+      }
       default: {
         break;
       }
     }
     await finishWork(input.sql, item.kind, item.key);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'job failed';
-    await finishWork(input.sql, item.kind, item.key, message);
+    await settleFailedItem(item, input.sql, error);
   }
+}
+
+async function settleFailedItem(item: WorkItem, sql: JobSql, error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : 'job failed';
+  if (item.kind !== 'run.execute') {
+    await finishWork(sql, item.kind, item.key, message);
+    return;
+  }
+  const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
+  const rows = await sql<{ status: string }[]>`
+    SELECT status FROM runs WHERE id = ${runId}
+  `;
+  const disposition = runExecuteFailureDisposition(rows.at(0)?.status);
+  if (disposition === 'unclaim') {
+    await unclaimWork(sql, item.kind, item.key, message);
+    return;
+  }
+  if (disposition === 'hold') {
+    await holdWork(sql, item.kind, item.key, message);
+    return;
+  }
+  await finishWork(sql, item.kind, item.key, message);
 }
 
 export function createJobsApp(tick: () => Promise<unknown>): Hono {

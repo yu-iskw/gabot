@@ -93,7 +93,7 @@ export function AppSidebar() {
                 to="/channel/$channelId"
                 params={{ channelId: channel.id }}
                 search={{}}
-                data-testid={channel.id === 'general' ? 'channel-general' : undefined}
+                data-testid={channel.name === 'General' ? 'channel-general' : undefined}
                 className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-sidebar-accent"
               >
                 <ChannelAvatar name={channel.name} size={32} />

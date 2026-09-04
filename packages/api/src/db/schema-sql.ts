@@ -233,9 +233,170 @@ CREATE TABLE IF NOT EXISTS mastra_messages (
   role TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS organizations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS organization_members (
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (organization_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS workspaces (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT workspaces_owner_required CHECK (owner_user_id IS NOT NULL)
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS project_id TEXT;
+
+CREATE TABLE IF NOT EXISTS channel_participants (
+  channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  principal_type TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (channel_id, principal_type, principal_id)
+);
+
+CREATE TABLE IF NOT EXISTS channel_events (
+  id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  run_id TEXT,
+  type TEXT NOT NULL,
+  actor_type TEXT NOT NULL,
+  actor_id TEXT,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS channel_events_channel_idx ON channel_events (channel_id, created_at);
+
+CREATE TABLE IF NOT EXISTS runs (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  parent_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+  root_run_id TEXT NOT NULL,
+  bot_id TEXT NOT NULL REFERENCES agents(id),
+  owner_user_id TEXT NOT NULL REFERENCES users(id),
+  trigger_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  objective TEXT NOT NULL DEFAULT '',
+  authority JSONB NOT NULL DEFAULT '{}'::jsonb,
+  depth INTEGER NOT NULL DEFAULT 0,
+  started_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS runs_channel_idx ON runs (channel_id, created_at);
+CREATE INDEX IF NOT EXISTS runs_root_idx ON runs (root_run_id);
+
+CREATE TABLE IF NOT EXISTS delegations (
+  id TEXT PRIMARY KEY,
+  parent_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  child_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  from_bot_id TEXT NOT NULL,
+  to_bot_id TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  requested_capabilities JSONB NOT NULL DEFAULT '[]'::jsonb,
+  authority_envelope JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS delegations_parent_idx ON delegations (parent_run_id);
+
+INSERT INTO organizations (id, name)
+VALUES ('org-gabot', 'gabot')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO organization_members (organization_id, user_id, role)
+SELECT 'org-gabot', u.id,
+  CASE WHEN EXISTS (
+    SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = 'admin'
+  ) THEN 'admin' ELSE 'member' END
+FROM users u
+ON CONFLICT DO NOTHING;
+
+INSERT INTO workspaces (id, organization_id, owner_user_id, name)
+SELECT 'ws-' || id, 'org-gabot', id, COALESCE(name, 'User') || '''s workspace'
+FROM users
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO projects (id, workspace_id, name)
+SELECT 'proj-' || id, 'ws-' || id, 'Default'
+FROM users
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO channels (id, name, description, project_id)
+SELECT 'ch-' || id || '-general', 'General', 'Default coworker channel', 'proj-' || id
+FROM users
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+SELECT 'ch-' || id || '-general', 'user', id, 'owner'
+FROM users
+ON CONFLICT DO NOTHING;
+
+INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+SELECT 'ch-' || u.id || '-general', 'bot', b.id, 'bot'
+FROM users u
+CROSS JOIN (
+  VALUES ('general-assistant'), ('monitor'), ('triage'), ('coder')
+) AS b(id)
+ON CONFLICT DO NOTHING;
+
+UPDATE routines
+SET channel_id = 'ch-' || owner_user_id || '-general'
+WHERE channel_id = 'general';
+
+DELETE FROM channel_participants WHERE channel_id = 'general';
+DELETE FROM channel_memberships WHERE channel_id = 'general';
+DELETE FROM channel_agents WHERE channel_id = 'general';
+
+INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+SELECT channel_id, 'user', user_id, 'member' FROM channel_memberships
+ON CONFLICT DO NOTHING;
+
+INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+SELECT channel_id, 'bot', agent_id, 'bot' FROM channel_agents
+ON CONFLICT DO NOTHING;
+
+UPDATE channels AS c
+SET project_id = 'proj-' || first_member.user_id
+FROM (
+  SELECT DISTINCT ON (channel_id) channel_id, user_id
+  FROM channel_memberships
+  ORDER BY channel_id, created_at
+) AS first_member
+WHERE c.id = first_member.channel_id AND c.project_id IS NULL;
 `;
 
 export const SEED_SQL = `
+INSERT INTO organizations (id, name)
+VALUES ('org-gabot', 'gabot')
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO agents (id, name, type, configuration)
 VALUES ('general-assistant', 'General Assistant', 'built_in', '{}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
@@ -244,13 +405,29 @@ INSERT INTO agent_profiles (agent_id, title, role_description, visibility)
 VALUES ('general-assistant', 'General Assistant', 'Helps with governed computer and MCP work.', 'public')
 ON CONFLICT (agent_id) DO NOTHING;
 
-INSERT INTO channels (id, name, description)
-VALUES ('general', 'General', 'Default coworker channel')
+INSERT INTO agents (id, name, type, configuration)
+VALUES ('monitor', 'Monitor', 'built_in', '{}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO channel_agents (channel_id, agent_id)
-VALUES ('general', 'general-assistant')
-ON CONFLICT DO NOTHING;
+INSERT INTO agent_profiles (agent_id, title, role_description, visibility)
+VALUES ('monitor', 'Monitor', 'Watches systems and delegates triage.', 'public')
+ON CONFLICT (agent_id) DO NOTHING;
+
+INSERT INTO agents (id, name, type, configuration)
+VALUES ('triage', 'Triage', 'built_in', '{}'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO agent_profiles (agent_id, title, role_description, visibility)
+VALUES ('triage', 'Triage', 'Turns incidents into actionable work and delegates coding.', 'public')
+ON CONFLICT (agent_id) DO NOTHING;
+
+INSERT INTO agents (id, name, type, configuration)
+VALUES ('coder', 'Coder', 'built_in', '{}'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO agent_profiles (agent_id, title, role_description, visibility)
+VALUES ('coder', 'Coder', 'Implements delegated coding work.', 'public')
+ON CONFLICT (agent_id) DO NOTHING;
 
 INSERT INTO action_policy (id, mode, deny, allow)
 VALUES ('current', 'enforce', ARRAY[]::text[], ARRAY['true'])

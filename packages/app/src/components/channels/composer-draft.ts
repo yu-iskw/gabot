@@ -11,6 +11,11 @@ import type { Segment } from 'prompt-area/helpers';
 export const AGENT_TRIGGER = '@';
 export const COMMAND_TRIGGER = '/';
 
+export type ComposerSubmit = {
+  botId: string | null;
+  message: string;
+};
+
 type ComposerDraft = {
   agentId: string | null;
   commandIds: string[];

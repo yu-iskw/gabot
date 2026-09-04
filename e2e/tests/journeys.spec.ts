@@ -27,9 +27,17 @@ async function signIn(page: Page): Promise<void> {
   await expect(page.getByTestId('user-email')).toHaveText(EMAIL);
 }
 
+async function openGeneral(page: Page): Promise<void> {
+  await expect(page.getByTestId('channel-general')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('channel-general').click();
+}
+
 async function signInAndOpenGeneral(page: Page, watch = false): Promise<void> {
   await signIn(page);
-  await page.goto(watch ? '/channel/general?watch=true' : '/channel/general');
+  await openGeneral(page);
+  if (watch) {
+    await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
+  }
 }
 
 test('signs in, navigates example.com, and records computer audit', async ({ page }) => {
@@ -182,7 +190,8 @@ test('grants MCP echo from Plugins so a bot can call it', async ({ page, request
     await expect(
       page.getByRole('switch', { name: 'Let General Assistant call echo' }),
     ).toHaveAttribute('aria-checked', 'true');
-    await page.goto('/channel/general?watch=true');
+    await page.getByTestId('channel-general').click();
+    await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
     await page.locator('textarea[name="prompt"]').fill('please echo hello via mcp');
     await page.getByRole('button', { name: 'Send' }).click();
     await expect(page.getByTestId('assistant-reply')).toContainText(/MCP echo|hello/i, {
@@ -195,4 +204,19 @@ test('grants MCP echo from Plugins so a bot can call it', async ({ page, request
       data: { agentId: 'general-assistant', ref: 'mock/echo', granted: false },
     });
   }
+});
+
+test('delegates monitor to triage to coder without human relay', async ({ page }) => {
+  await signInAndOpenGeneral(page);
+  await page
+    .locator('textarea[name="prompt"]')
+    .fill('@monitor inspect production errors from the last 24 hours');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByTestId('assistant-reply')).toContainText(/Delegated|triage/i, {
+    timeout: 60_000,
+  });
+  await expect(async () => {
+    await page.reload();
+    await expect(page.getByText(/coding-agent|Started coding/i).first()).toBeVisible();
+  }).toPass({ timeout: 60_000 });
 });
