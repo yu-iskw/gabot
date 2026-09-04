@@ -16,8 +16,8 @@ const MCP_RE = /mcp|echo/i;
 const NAVIGATE_RE = /example\.com|navigate/i;
 const NOTE_RE = /note/i;
 const NAMED_RE = /named\s+([^,.]+)/i;
-const TASK_RE = /(?:to|that)\s+(.+)$/i;
-const TO_INSTRUCTION_RE = /\bto\s+(.+)$/i;
+const TASK_RE = /(?:to|that)\s+(\S.*)$/i;
+const TO_INSTRUCTION_RE = /\bto\s+(\S.*)$/i;
 
 export function decideScriptedTurn(messages: ChatMessage[]): ModelTurn {
   const last = messages.at(-1);
