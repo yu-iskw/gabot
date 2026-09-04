@@ -12,7 +12,7 @@ import { requireUser } from './auth.js';
 import { runGatewayAction } from './gateway.js';
 import { getPluginDetail, listPluginViews } from './plugin-views.js';
 import { PROTECTED_AGENT_ID, type GabotStore, type SessionUser } from './store/types.js';
-import { executeTurn } from './turns.js';
+import { executeRun, executeTurn } from './turns.js';
 
 import type { AuthVariables } from './auth.js';
 import type { AgentRunner } from './turns.js';
@@ -39,6 +39,9 @@ const API_CHANNELS = '/api/channels';
 const API_ROUTINES = '/api/routines';
 const API_SKILLS = '/api/skills';
 const NOT_FOUND = 'Not found';
+const UNAUTHORIZED = 'Unauthorized';
+const INVALID_BODY = 'Invalid body';
+const WORKER_SECRET_HEADER = 'x-gabot-worker-secret';
 
 export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
@@ -81,6 +84,24 @@ function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     }
     return context.json({ messages: await options.store.listMessages(channelId) });
   });
+  app.get('/api/channels/:id/participants', async (context) => {
+    const user = context.get('user');
+    const channelId = context.req.param('id');
+    const channel = await options.store.getChannel(channelId, user.id);
+    if (!channel) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    return context.json({ participants: await options.store.listChannelParticipants(channelId) });
+  });
+  app.get('/api/channels/:id/events', async (context) => {
+    const user = context.get('user');
+    const channelId = context.req.param('id');
+    const channel = await options.store.getChannel(channelId, user.id);
+    if (!channel) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    return context.json({ events: await options.store.listChannelEvents(channelId) });
+  });
   app.post(API_CHANNELS, async (context) => {
     const user = context.get('user');
     const body = asRecord(await context.req.json());
@@ -108,6 +129,7 @@ function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options:
       user,
       channelId,
       message: asString(body.message),
+      botId: asString(body.botId) || undefined,
     });
     const payload = `data: ${JSON.stringify({ type: 'text', delta: result.text, toolNames: result.toolNames })}\n\ndata: ${JSON.stringify({ type: 'done' })}\n\n`;
     return context.body(payload, 200, { 'content-type': 'text/event-stream' });
@@ -398,14 +420,14 @@ function registerInternalRoutes(
   options: ApiOptions,
 ): void {
   app.post('/api/internal/handoff', async (context) => {
-    if (!matchesWorker(context.req.header('x-gabot-worker-secret'), options.workerSecret)) {
-      return context.json({ error: 'Unauthorized' }, 401);
+    if (!matchesWorker(context.req.header(WORKER_SECRET_HEADER), options.workerSecret)) {
+      return context.json({ error: UNAUTHORIZED }, 401);
     }
     const body = asRecord(await context.req.json());
     const channelId = asString(body.channelId);
     const text = asString(body.text);
     if (!channelId || !text) {
-      return context.json({ error: 'Invalid body' }, 400);
+      return context.json({ error: INVALID_BODY }, 400);
     }
     await options.store.appendMessage({
       channelId,
@@ -416,8 +438,8 @@ function registerInternalRoutes(
     return context.json({ ok: true });
   });
   app.post('/api/internal/routines/run', async (context) => {
-    if (!matchesWorker(context.req.header('x-gabot-worker-secret'), options.workerSecret)) {
-      return context.json({ error: 'Unauthorized' }, 401);
+    if (!matchesWorker(context.req.header(WORKER_SECRET_HEADER), options.workerSecret)) {
+      return context.json({ error: UNAUTHORIZED }, 401);
     }
     const body = asRecord(await context.req.json());
     const channelId = asString(body.channelId);
@@ -426,7 +448,7 @@ function registerInternalRoutes(
     const agentId = asString(body.agentId) || BOT;
     const owner = await options.store.getUser(ownerUserId);
     if (!channelId || !instruction || !owner) {
-      return context.json({ error: 'Invalid body' }, 400);
+      return context.json({ error: INVALID_BODY }, 400);
     }
     const result = await executeTurn({
       store: options.store,
@@ -439,6 +461,30 @@ function registerInternalRoutes(
       botId: agentId,
     });
     return context.json({ ok: true, text: result.text });
+  });
+  app.post('/api/internal/runs/execute', async (context) => {
+    if (!matchesWorker(context.req.header(WORKER_SECRET_HEADER), options.workerSecret)) {
+      return context.json({ error: UNAUTHORIZED }, 401);
+    }
+    const body = asRecord(await context.req.json());
+    const runId = asString(body.runId);
+    const run = await options.store.getRun(runId);
+    if (!run) {
+      return context.json({ error: INVALID_BODY }, 400);
+    }
+    const owner = await options.store.getUser(run.ownerUserId);
+    if (!owner) {
+      return context.json({ error: INVALID_BODY }, 400);
+    }
+    const result = await executeRun({
+      store: options.store,
+      sandbox: options.sandbox,
+      agent: options.agent,
+      mcpUrl: options.mcpUrl,
+      user: owner,
+      runId,
+    });
+    return context.json({ ok: true, text: result.text, runId: result.runId });
   });
 }
 

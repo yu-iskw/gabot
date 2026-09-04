@@ -11,6 +11,11 @@ async function signIn(page: Page): Promise<void> {
   await expect(page.getByTestId('user-email')).toHaveText(EMAIL);
 }
 
+async function openGeneral(page: Page): Promise<void> {
+  await expect(page.getByTestId('channel-general')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('channel-general').click();
+}
+
 async function shot(page: Page, dir: string, file: string): Promise<void> {
   await page.screenshot({ path: path.join(dir, file), fullPage: true });
 }
@@ -31,18 +36,19 @@ test('snapshots OpenBot-equivalent screens and use cases', async ({ page }) => {
   await signIn(page);
   await shot(page, dir, '02-home.png');
 
-  await page.goto('/channel/general');
+  await openGeneral(page);
   await shot(page, dir, '03-channel-empty.png');
 
-  await page.goto('/channel/general?watch=true');
+  await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
   await expect(page.getByTestId('computer-view')).toBeVisible();
   await shot(page, dir, '25-channel-watch-empty.png');
 
-  await page.goto('/channel/general?settings=true');
+  await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
+  await page.getByRole('button', { name: 'Channel coworker' }).click();
   await expect(page.getByTestId('agent-profile')).toBeVisible();
   await shot(page, dir, '27-channel-settings-url.png');
 
-  await page.goto('/channel/general');
+  await page.getByRole('button', { name: 'Channel coworker' }).click();
   await page.getByLabel('Message').click();
   await page.keyboard.type('/');
   await shot(page, dir, '26-composer-slash.png');
@@ -61,7 +67,8 @@ test('snapshots OpenBot-equivalent screens and use cases', async ({ page }) => {
   await expect(page.getByText('say hello').first()).toBeVisible();
   await shot(page, dir, '07-routines-after-schedule.png');
 
-  await page.goto('/channel/general?watch=true');
+  await page.getByTestId('channel-general').click();
+  await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
   await sendPrompt(page, 'please navigate to example.com', /example.com/i);
   await expect(page.getByTestId('audit-events')).toContainText('Opened');
   await shot(page, dir, '08-channel-computer.png');

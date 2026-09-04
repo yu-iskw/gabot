@@ -39,11 +39,33 @@ export {
   CREATE_BOT_TOOL,
   CREATE_ROUTINE,
   CREATE_ROUTINE_TOOL,
+  DELEGATE_TO_BOT,
+  DELEGATE_TO_BOT_TOOL,
   MCP_ECHO,
   MCP_ECHO_TOOL,
+  TURN_TOOL_NAMES,
   UPDATE_ROUTINE,
   UPDATE_ROUTINE_TOOL,
 } from './tool-catalog.js';
+export {
+  assertDelegationBudget,
+  attenuateAuthority,
+  DEFAULT_MAX_CHILD_RUNS,
+  DEFAULT_MAX_DELEGATION_DEPTH,
+  DEFAULT_MAX_RUNS_PER_ROOT,
+  rootAuthority,
+  runMayInvoke,
+} from './authority.js';
+export type { AuthorityEnvelope, AuthorityResult, DelegationBudget } from './authority.js';
+export {
+  DEFAULT_CHANNEL_NAME,
+  DEFAULT_TEAM_BOT_IDS,
+  mentionedBotId,
+  personalChannelId,
+  personalProjectId,
+  personalWorkspaceId,
+  PLATFORM_ORG_ID,
+} from './tenancy.js';
 export type { AguiEvent, AguiRunInput, AguiToolCall } from './ag-ui.js';
 export {
   aguiEventsToSse,

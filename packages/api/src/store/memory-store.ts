@@ -1,6 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
-import { DEFAULT_ALLOW_POLICY, nextRoutineRun } from '@gabot/common';
+import {
+  DEFAULT_ALLOW_POLICY,
+  DEFAULT_CHANNEL_NAME,
+  DEFAULT_TEAM_BOT_IDS,
+  nextRoutineRun,
+  personalChannelId,
+  personalProjectId,
+  personalWorkspaceId,
+  PLATFORM_ORG_ID,
+} from '@gabot/common';
 
 import { PROTECTED_AGENT_ID } from './types.js';
 
@@ -8,7 +17,11 @@ import type {
   AgentPatch,
   AgentProfile,
   AuditRecord,
+  ChannelEventRecord,
+  ChannelParticipant,
   ChannelRecord,
+  ChannelScope,
+  DelegationRecord,
   GabotStore,
   GrantRecord,
   MessageRecord,
@@ -17,16 +30,20 @@ import type {
   RoutineListItem,
   RoutinePatch,
   RoutineRecord,
+  RunRecord,
+  RunStatus,
   SessionUser,
   SkillRecord,
   WorkRecord,
+  WorkspaceRecord,
 } from './types.js';
-import type { ActionPolicy, VerifiedPerson } from '@gabot/common';
+import type { ActionPolicy, AuthorityEnvelope, VerifiedPerson } from '@gabot/common';
 
 /* eslint-disable @typescript-eslint/require-await -- GabotStore is async for Postgres. */
 
 type UserRow = SessionUser;
 type Membership = { channelId: string; userId: string };
+type ChannelAgent = { agentId: string; channelId: string };
 type ThreadRow = { userId: string; channelId: string; threadId: string };
 type GrantRow = { kind: string; ref: string; agentId: string };
 type WorkRow = WorkRecord & {
@@ -37,20 +54,56 @@ type WorkRow = WorkRecord & {
   lastError: string | null;
 };
 type RoutineRow = RoutineListItem;
-
-const GENERAL_CHANNEL: ChannelRecord = {
-  id: 'general',
-  name: 'General',
-  description: 'Default coworker channel',
-  lastMessage: null,
+type ChannelRow = ChannelRecord & { projectId: string };
+type WorkspaceRow = {
+  id: string;
+  name: string;
+  organizationId: string;
+  ownerUserId: string;
+  projectId: string;
 };
+
+const TEAM_BOTS: AgentProfile[] = [
+  {
+    id: 'general-assistant',
+    name: 'General Assistant',
+    title: 'General Assistant',
+    roleDescription: 'Helps with governed computer and MCP work.',
+    visibility: 'public',
+  },
+  {
+    id: 'monitor',
+    name: 'Monitor',
+    title: 'Monitor',
+    roleDescription: 'Watches systems and delegates triage.',
+    visibility: 'public',
+  },
+  {
+    id: 'triage',
+    name: 'Triage',
+    title: 'Triage',
+    roleDescription: 'Turns incidents into actionable work and delegates coding.',
+    visibility: 'public',
+  },
+  {
+    id: 'coder',
+    name: 'Coder',
+    title: 'Coder',
+    roleDescription: 'Implements delegated coding work.',
+    visibility: 'public',
+  },
+];
 
 export class MemoryStore implements GabotStore {
   private readonly users = new Map<string, UserRow>();
-  private readonly channels = new Map<string, ChannelRecord>([
-    [GENERAL_CHANNEL.id, { ...GENERAL_CHANNEL }],
-  ]);
+  private readonly workspaces = new Map<string, WorkspaceRow>();
+  private readonly channels = new Map<string, ChannelRow>();
   private readonly memberships: Membership[] = [];
+  private readonly channelAgents: ChannelAgent[] = [];
+  private readonly participants: ChannelParticipant[] = [];
+  private readonly events: ChannelEventRecord[] = [];
+  private readonly runs = new Map<string, RunRecord>();
+  private readonly delegations: DelegationRecord[] = [];
   private readonly messages: MessageRecord[] = [];
   private readonly threads: ThreadRow[] = [];
   private readonly audits: AuditRecord[] = [];
@@ -59,15 +112,7 @@ export class MemoryStore implements GabotStore {
   ];
   private readonly work: WorkRow[] = [];
   private readonly routines: RoutineRow[] = [];
-  private readonly agents: AgentProfile[] = [
-    {
-      id: 'general-assistant',
-      name: 'General Assistant',
-      title: 'General Assistant',
-      roleDescription: 'Helps with governed computer and MCP work.',
-      visibility: 'public',
-    },
-  ];
+  private readonly agents: AgentProfile[] = TEAM_BOTS.map((bot) => ({ ...bot }));
   private readonly skills: SkillRecord[] = [
     {
       id: 'brief',
@@ -90,14 +135,23 @@ export class MemoryStore implements GabotStore {
     };
     user.isAdmin = isAdmin || user.isAdmin;
     this.users.set(user.id, user);
-    if (
-      !this.memberships.some(
-        (row) => row.userId === user.id && row.channelId === GENERAL_CHANNEL.id,
-      )
-    ) {
-      this.memberships.push({ userId: user.id, channelId: GENERAL_CHANNEL.id });
-    }
+    this.ensurePersonalWorkspace(user);
     return user;
+  }
+
+  public async getWorkspaceForUser(userId: string): Promise<WorkspaceRecord | null> {
+    const row = [...this.workspaces.values()].find((item) => item.ownerUserId === userId);
+    if (!row) {
+      return null;
+    }
+    return {
+      id: row.id,
+      organizationId: row.organizationId,
+      ownerUserId: row.ownerUserId,
+      name: row.name,
+      projectId: row.projectId,
+      defaultChannelId: personalChannelId(userId),
+    };
   }
 
   public async listChannels(userId: string): Promise<ChannelRecord[]> {
@@ -334,15 +388,200 @@ export class MemoryStore implements GabotStore {
     userId: string;
     agentId?: string;
   }): Promise<ChannelRecord> {
-    const channel: ChannelRecord = {
+    const workspace = this.workspaces.get(personalWorkspaceId(input.userId));
+    if (!workspace) {
+      throw new Error('Workspace not found.');
+    }
+    const channel: ChannelRow = {
       id: `channel_${randomUUID()}`,
       name: input.name,
       description: '',
       lastMessage: null,
+      projectId: workspace.projectId,
     };
     this.channels.set(channel.id, channel);
-    this.memberships.push({ channelId: channel.id, userId: input.userId });
-    return channel;
+    this.attachChannelParties(channel.id, input.userId, input.agentId);
+    return toChannelRecord(channel);
+  }
+
+  public async getChannelScope(channelId: string): Promise<ChannelScope | null> {
+    const channel = this.channels.get(channelId);
+    if (!channel) {
+      return null;
+    }
+    const workspace = [...this.workspaces.values()].find(
+      (row) => row.projectId === channel.projectId,
+    );
+    if (!workspace) {
+      return null;
+    }
+    return {
+      channelId,
+      projectId: channel.projectId,
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+    };
+  }
+
+  public async listChannelParticipants(channelId: string): Promise<ChannelParticipant[]> {
+    return this.participants
+      .filter((row) => row.channelId === channelId)
+      .map((row) => ({ ...row }));
+  }
+
+  public async isChannelParticipant(
+    channelId: string,
+    principalType: 'bot' | 'user',
+    principalId: string,
+  ): Promise<boolean> {
+    return this.participants.some(
+      (row) =>
+        row.channelId === channelId &&
+        row.principalType === principalType &&
+        row.principalId === principalId,
+    );
+  }
+
+  public async addChannelParticipant(input: ChannelParticipant): Promise<void> {
+    this.rememberParticipant(input);
+  }
+
+  public async appendChannelEvent(input: {
+    actorId?: string;
+    actorType: string;
+    channelId: string;
+    payload?: Record<string, unknown>;
+    runId?: string;
+    type: string;
+  }): Promise<ChannelEventRecord> {
+    const record: ChannelEventRecord = {
+      id: randomUUID(),
+      channelId: input.channelId,
+      runId: input.runId ?? null,
+      type: input.type,
+      actorType: input.actorType,
+      actorId: input.actorId ?? null,
+      payload: input.payload ?? {},
+      createdAt: new Date(),
+    };
+    this.events.push(record);
+    return record;
+  }
+
+  public async listChannelEvents(channelId: string): Promise<ChannelEventRecord[]> {
+    return this.events.filter((row) => row.channelId === channelId).map((row) => ({ ...row }));
+  }
+
+  public async createRun(input: {
+    authority: AuthorityEnvelope;
+    botId: string;
+    channelId: string;
+    depth: number;
+    id?: string;
+    objective: string;
+    ownerUserId: string;
+    parentRunId?: string;
+    projectId: string;
+    rootRunId?: string;
+    status: RunStatus;
+    triggerType: string;
+    workspaceId: string;
+  }): Promise<RunRecord> {
+    const id = input.id ?? randomUUID();
+    const record: RunRecord = {
+      id,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      channelId: input.channelId,
+      parentRunId: input.parentRunId ?? null,
+      rootRunId: input.rootRunId ?? id,
+      botId: input.botId,
+      ownerUserId: input.ownerUserId,
+      triggerType: input.triggerType,
+      status: input.status,
+      objective: input.objective,
+      authority: { allowedTools: [...input.authority.allowedTools] },
+      depth: input.depth,
+      startedAt: input.status === 'running' ? new Date() : null,
+      finishedAt: null,
+      error: null,
+    };
+    this.runs.set(id, record);
+    return { ...record, authority: { allowedTools: [...record.authority.allowedTools] } };
+  }
+
+  public async getRun(runId: string): Promise<RunRecord | null> {
+    const row = this.runs.get(runId);
+    return row ? cloneRun(row) : null;
+  }
+
+  public async updateRunStatus(
+    runId: string,
+    status: RunStatus,
+    error?: string,
+  ): Promise<RunRecord | null> {
+    const row = this.runs.get(runId);
+    if (!row) {
+      return null;
+    }
+    row.status = status;
+    if (status === 'running' && !row.startedAt) {
+      row.startedAt = new Date();
+    }
+    if (status === 'succeeded' || status === 'failed' || status === 'cancelled') {
+      row.finishedAt = new Date();
+      row.error = error ?? null;
+    }
+    return cloneRun(row);
+  }
+
+  public async listRunsForChannel(channelId: string): Promise<RunRecord[]> {
+    return [...this.runs.values()].filter((row) => row.channelId === channelId).map(cloneRun);
+  }
+
+  public async countRunsForRoot(rootRunId: string): Promise<number> {
+    return [...this.runs.values()].filter((row) => row.rootRunId === rootRunId).length;
+  }
+
+  public async countChildRuns(parentRunId: string): Promise<number> {
+    return [...this.runs.values()].filter((row) => row.parentRunId === parentRunId).length;
+  }
+
+  public async createDelegation(input: {
+    authorityEnvelope: AuthorityEnvelope;
+    childRunId: string;
+    fromBotId: string;
+    objective: string;
+    parentRunId: string;
+    requestedCapabilities: string[];
+    toBotId: string;
+  }): Promise<DelegationRecord> {
+    const record: DelegationRecord = {
+      id: randomUUID(),
+      parentRunId: input.parentRunId,
+      childRunId: input.childRunId,
+      fromBotId: input.fromBotId,
+      toBotId: input.toBotId,
+      objective: input.objective,
+      requestedCapabilities: [...input.requestedCapabilities],
+      authorityEnvelope: { allowedTools: [...input.authorityEnvelope.allowedTools] },
+    };
+    this.delegations.push(record);
+    return {
+      ...record,
+      requestedCapabilities: [...record.requestedCapabilities],
+      authorityEnvelope: { allowedTools: [...record.authorityEnvelope.allowedTools] },
+    };
+  }
+
+  public async listDelegationsForParent(parentRunId: string): Promise<DelegationRecord[]> {
+    return this.delegations
+      .filter((row) => row.parentRunId === parentRunId)
+      .map((row) => ({
+        ...row,
+        requestedCapabilities: [...row.requestedCapabilities],
+        authorityEnvelope: { allowedTools: [...row.authorityEnvelope.allowedTools] },
+      }));
   }
 
   public async listSkills(): Promise<SkillRecord[]> {
@@ -480,6 +719,85 @@ export class MemoryStore implements GabotStore {
   public addRoutine(routine: RoutineRow): void {
     this.routines.push(routine);
   }
+
+  private ensurePersonalWorkspace(user: SessionUser): void {
+    const workspaceId = personalWorkspaceId(user.id);
+    const projectId = personalProjectId(user.id);
+    const channelId = personalChannelId(user.id);
+    if (!this.workspaces.has(workspaceId)) {
+      this.workspaces.set(workspaceId, {
+        id: workspaceId,
+        organizationId: PLATFORM_ORG_ID,
+        ownerUserId: user.id,
+        name: `${user.name}'s workspace`,
+        projectId,
+      });
+    }
+    if (!this.channels.has(channelId)) {
+      this.channels.set(channelId, {
+        id: channelId,
+        name: DEFAULT_CHANNEL_NAME,
+        description: 'Default coworker channel',
+        lastMessage: null,
+        projectId,
+      });
+    }
+    this.attachChannelParties(channelId, user.id);
+  }
+
+  private attachChannelParties(channelId: string, userId: string, extraBotId?: string): void {
+    this.rememberParticipant({
+      channelId,
+      principalType: 'user',
+      principalId: userId,
+      role: 'owner',
+    });
+    if (!this.memberships.some((row) => row.channelId === channelId && row.userId === userId)) {
+      this.memberships.push({ channelId, userId });
+    }
+    const bots = new Set<string>(DEFAULT_TEAM_BOT_IDS);
+    if (extraBotId) {
+      bots.add(extraBotId);
+    }
+    for (const botId of bots) {
+      this.rememberParticipant({
+        channelId,
+        principalType: 'bot',
+        principalId: botId,
+        role: 'bot',
+      });
+    }
+  }
+
+  private rememberParticipant(input: ChannelParticipant): void {
+    const exists = this.participants.some(
+      (row) =>
+        row.channelId === input.channelId &&
+        row.principalType === input.principalType &&
+        row.principalId === input.principalId,
+    );
+    if (!exists) {
+      this.participants.push({ ...input });
+    }
+    if (input.principalType === 'user') {
+      if (
+        !this.memberships.some(
+          (row) => row.channelId === input.channelId && row.userId === input.principalId,
+        )
+      ) {
+        this.memberships.push({ channelId: input.channelId, userId: input.principalId });
+      }
+    }
+    if (input.principalType === 'bot') {
+      if (
+        !this.channelAgents.some(
+          (row) => row.channelId === input.channelId && row.agentId === input.principalId,
+        )
+      ) {
+        this.channelAgents.push({ channelId: input.channelId, agentId: input.principalId });
+      }
+    }
+  }
 }
 
 function isClaimable(row: WorkRow, now: Date): boolean {
@@ -493,4 +811,17 @@ function isClaimable(row: WorkRow, now: Date): boolean {
     return true;
   }
   return row.leaseUntil !== null && row.leaseUntil < now;
+}
+
+function toChannelRecord(channel: ChannelRow): ChannelRecord {
+  return {
+    id: channel.id,
+    name: channel.name,
+    description: channel.description,
+    lastMessage: channel.lastMessage,
+  };
+}
+
+function cloneRun(row: RunRecord): RunRecord {
+  return { ...row, authority: { allowedTools: [...row.authority.allowedTools] } };
 }

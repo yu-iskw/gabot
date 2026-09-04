@@ -3,6 +3,7 @@ import {
   COMPUTER_NAVIGATE,
   CREATE_BOT,
   CREATE_ROUTINE,
+  DELEGATE_TO_BOT,
   MCP_ECHO,
   UPDATE_ROUTINE,
 } from './tool-catalog.js';
@@ -22,10 +23,33 @@ export function decideScriptedTurn(messages: ChatMessage[]): ModelTurn {
   if (last?.role === 'tool') {
     return { text: summarizeTool(last), toolCalls: [] };
   }
-  return matchUserTurn(findLast(messages, 'user')?.content ?? '');
+  return matchUserTurn(findLast(messages, 'user')?.content ?? '', identityBotId(messages));
 }
 
-function matchUserTurn(content: string): ModelTurn {
+function identityBotId(messages: ChatMessage[]): string | undefined {
+  const prefix = 'You are ';
+  for (const message of messages) {
+    if (message.role !== 'system' || !message.content.startsWith(prefix)) {
+      continue;
+    }
+    const rest = message.content.slice(prefix.length);
+    const dot = rest.indexOf('.');
+    if (dot <= 0) {
+      continue;
+    }
+    const id = rest.slice(0, dot).trim();
+    if (id.length > 0) {
+      return id;
+    }
+  }
+  return undefined;
+}
+
+function matchUserTurn(content: string, botId?: string): ModelTurn {
+  const team = teamScript(content, botId);
+  if (team) {
+    return team;
+  }
   if (CREATE_BOT_RE.test(content)) {
     const name = namedBot(content);
     return call(CREATE_BOT, 'call_bot', {
@@ -66,9 +90,35 @@ function matchUserTurn(content: string): ModelTurn {
   return { text: 'Hello from gabot.', toolCalls: [] };
 }
 
-function call(name: string, id: string, args: Record<string, string>): ModelTurn {
+function teamScript(content: string, botId?: string): ModelTurn | undefined {
+  if (botId === 'monitor' && wantsProductionChain(content)) {
+    return call(DELEGATE_TO_BOT, 'call_delegate', {
+      botId: 'triage',
+      objective: 'Triage production errors from the last 24 hours.',
+      requestedCapabilities: [DELEGATE_TO_BOT, CREATE_BOT, COMPONENT_NOTE],
+    });
+  }
+  if (botId === 'triage') {
+    return call(DELEGATE_TO_BOT, 'call_delegate', {
+      botId: 'coder',
+      objective: 'Implement a fix for the triaged production issues.',
+      requestedCapabilities: [COMPONENT_NOTE],
+    });
+  }
+  if (botId === 'coder') {
+    return { text: 'Started coding-agent task for the triaged issues.', toolCalls: [] };
+  }
+  return undefined;
+}
+
+function call(name: string, id: string, args: Record<string, unknown>): ModelTurn {
   const toolCalls: ModelToolCall[] = [{ id, name, arguments: args }];
   return { text: '', toolCalls };
+}
+
+function wantsProductionChain(content: string): boolean {
+  const lower = content.toLowerCase();
+  return lower.includes('inspect production') || lower.includes('production errors');
 }
 
 function namedBot(content: string): string {
@@ -203,7 +253,8 @@ function summarizeTool(message: ChatMessage): string {
   if (
     message.toolName === CREATE_BOT ||
     message.toolName === CREATE_ROUTINE ||
-    message.toolName === UPDATE_ROUTINE
+    message.toolName === UPDATE_ROUTINE ||
+    message.toolName === DELEGATE_TO_BOT
   ) {
     return message.content || 'Done.';
   }

@@ -24,6 +24,10 @@ describe('captionForTool', () => {
     expect(caption.detail).toBe('https://example.com');
   });
 
+  it('names a delegated hop', () => {
+    expect(captionForTool('Delegated to @triage.').label).toBe('Delegated');
+  });
+
   it('marks a grant refusal as blocked', () => {
     const caption = captionForTool('MCP tool echo on mock is not granted.');
     expect(caption.refused).toBe(true);

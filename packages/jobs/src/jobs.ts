@@ -80,7 +80,10 @@ export async function deliverHandoff(
   apiUrl: string,
   secret: string,
 ): Promise<void> {
-  const channelId = typeof item.payload.channelId === 'string' ? item.payload.channelId : 'general';
+  const channelId = typeof item.payload.channelId === 'string' ? item.payload.channelId : '';
+  if (!channelId) {
+    throw new Error('handoff payload missing channelId');
+  }
   const prompt =
     typeof item.payload.prompt === 'string'
       ? item.payload.prompt
@@ -101,6 +104,19 @@ export async function deliverRoutine(
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': secret },
     body: JSON.stringify(item.payload),
+  });
+}
+
+export async function deliverRun(
+  item: { key: string; payload: Record<string, unknown> },
+  apiUrl: string,
+  secret: string,
+): Promise<void> {
+  const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
+  await fetch(`${apiUrl.replace(/\/$/, '')}/api/internal/runs/execute`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': secret },
+    body: JSON.stringify({ runId }),
   });
 }
 
@@ -133,6 +149,10 @@ async function handleItem(
       }
       case 'routine.run': {
         await deliverRoutine(item, input.apiUrl, input.secret);
+        break;
+      }
+      case 'run.execute': {
+        await deliverRun(item, input.apiUrl, input.secret);
         break;
       }
       default: {

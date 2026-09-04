@@ -1,6 +1,8 @@
 # gabot
 
-Google Cloud coworker platform: governed agents, computers, and MCP without CopilotKit.
+Personal AI-team workspace: one human works with autonomous AI teammates. Bots have capabilities, not credentials; privileged actions run through owner-delegated, run-scoped authority on the gabot control plane.
+
+Channels belong to a personal workspace, not a shared global inbox.
 
 ## Getting Started
 

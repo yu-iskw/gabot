@@ -12,6 +12,7 @@ import {
   COMPUTER_NAVIGATE,
   CREATE_BOT,
   CREATE_ROUTINE,
+  DELEGATE_TO_BOT,
   MCP_ECHO,
   UPDATE_ROUTINE,
 } from './tool-catalog.js';
@@ -120,6 +121,28 @@ describe('decideScriptedTurn', () => {
       { role: 'user', content: 'please echo hello via mcp' },
     ]);
     expect(turn.toolCalls[0]?.name).toBe(MCP_ECHO);
+  });
+
+  it('delegates monitor production work to triage', () => {
+    const turn = decideScriptedTurn([
+      { role: 'system', content: 'You are monitor.' },
+      { role: 'user', content: 'inspect production errors from the last 24 hours' },
+    ]);
+    expect(turn.toolCalls[0]?.name).toBe(DELEGATE_TO_BOT);
+    expect(turn.toolCalls[0]?.arguments.botId).toBe('triage');
+  });
+
+  it('has triage delegate to coder and coder reply in text', () => {
+    const triage = decideScriptedTurn([
+      { role: 'system', content: 'You are triage.' },
+      { role: 'user', content: 'Triage production errors from the last 24 hours.' },
+    ]);
+    expect(triage.toolCalls[0]?.arguments.botId).toBe('coder');
+    const coder = decideScriptedTurn([
+      { role: 'system', content: 'You are coder.' },
+      { role: 'user', content: 'Implement a fix for the triaged production issues.' },
+    ]);
+    expect(coder.text.toLowerCase()).toContain('coding');
   });
 });
 

@@ -84,7 +84,7 @@ function ChannelScreen() {
   const navigate = channelRoute.useNavigate();
   return (
     <ChannelPage
-      channelId={readRouteString(params, 'channelId', 'general')}
+      channelId={readRouteString(params, 'channelId', '')}
       pane={paneFromSearch(search)}
       onPane={(next) => {
         void navigate({ search: searchForPane(next) });

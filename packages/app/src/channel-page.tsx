@@ -45,17 +45,37 @@ export function ChannelPage({
     queryKey: ['messages', channelId],
     queryFn: async () => {
       const body = await apiJson<{
-        messages: Array<{ id: string; role: string; content: string }>;
+        messages: Array<{ agentId: string | null; content: string; id: string; role: string }>;
       }>(`/api/channels/${channelId}/messages`, await token());
       return body.messages;
     },
   });
+  const participants = useQuery({
+    queryKey: ['participants', channelId],
+    queryFn: async () => {
+      const body = await apiJson<{
+        participants: Array<{ principalId: string; principalType: string }>;
+      }>(`/api/channels/${channelId}/participants`, await token());
+      return body.participants;
+    },
+  });
+  const events = useQuery({
+    queryKey: ['events', channelId],
+    queryFn: async () => {
+      const body = await apiJson<{
+        events: Array<{ id: string; payload: Record<string, unknown>; type: string }>;
+      }>(`/api/channels/${channelId}/events`, await token());
+      return body.events;
+    },
+  });
   const send = useMutation({
-    mutationFn: async (message: string) =>
-      readTurnStream(`/api/channels/${channelId}/turns`, await token(), message),
+    mutationFn: async (input: { botId: string | null; message: string }) =>
+      readTurnStream(`/api/channels/${channelId}/turns`, await token(), input.message, input.botId),
     onSuccess: async (text) => {
       setReply(text);
       await queryClient.invalidateQueries({ queryKey: ['messages'] });
+      await queryClient.invalidateQueries({ queryKey: ['events'] });
+      await queryClient.invalidateQueries({ queryKey: ['participants'] });
       await queryClient.invalidateQueries({ queryKey: ['audit'] });
       await queryClient.invalidateQueries({ queryKey: ['channels'] });
       await queryClient.invalidateQueries({ queryKey: ['screenshot'] });
@@ -71,7 +91,11 @@ export function ChannelPage({
       onClose={() => onPane(null)}
     >
       <ChannelHeader name={channelName} pane={pane} onPane={onPane} />
-      <Transcript messages={messages.data ?? []} pending={send.isPending} />
+      <Transcript
+        events={events.data ?? []}
+        messages={messages.data ?? []}
+        pending={send.isPending}
+      />
       <p data-testid="assistant-reply" className="sr-only">
         {reply}
       </p>
@@ -79,9 +103,12 @@ export function ChannelPage({
         <Composer
           compact
           pending={send.isPending}
+          permittedAgentIds={(participants.data ?? [])
+            .filter((row) => row.principalType === 'bot')
+            .map((row) => row.principalId)}
           placeholder="Ask anything"
           submitLabel="Send"
-          onSubmit={(message) => send.mutate(message)}
+          onSubmit={(input) => send.mutate(input)}
         />
       </div>
     </DetailPanel>

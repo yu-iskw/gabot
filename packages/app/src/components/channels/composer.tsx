@@ -13,6 +13,7 @@ import { applyCommandChips, enforceSingleAgent, toDraft } from './composer-draft
 import { PLACEHOLDER_COMMANDS } from './composer-sources.js';
 import { buildTriggers, toAgentOptions, toCommandOptions } from './composer-triggers.js';
 
+import type { ComposerSubmit } from './composer-draft.js';
 import type { Coworker } from '../../lib/agents.js';
 import type { Segment } from 'prompt-area/helpers';
 import type { FormEvent, KeyboardEvent } from 'react';
@@ -29,20 +30,22 @@ export function Composer({
   editorClassName,
   onSubmit,
   pending,
+  permittedAgentIds,
   placeholder,
   submitLabel,
 }: {
   className?: string;
   compact?: boolean;
   editorClassName?: string;
-  onSubmit: (message: string) => void;
+  onSubmit: (input: ComposerSubmit) => void;
   pending: boolean;
+  permittedAgentIds?: readonly string[];
   placeholder: string;
   submitLabel: string;
 }) {
   const [value, setValue] = useState<Segment[]>([]);
   const sending = useRef(false);
-  const { agents, commands } = useComposerCatalog();
+  const { agents, commands } = useComposerCatalog(permittedAgentIds);
   const triggers = useMemo(() => buildTriggers({ agents, commands }), [agents, commands]);
   const draft = useMemo(() => toDraft(value), [value]);
   const canSend = !draft.isEmpty && !pending;
@@ -58,14 +61,14 @@ export function Composer({
     [commands],
   );
 
-  function submitNow(text?: string): void {
+  function submitNow(text?: string, botId?: string | null): void {
     const submitted = (text ?? draft.text).trim();
     if (submitted.length === 0 || pending || sending.current) {
       return;
     }
     sending.current = true;
     setValue([]);
-    onSubmit(submitted);
+    onSubmit({ message: submitted, botId: botId === undefined ? draft.agentId : botId });
     sending.current = false;
   }
 
@@ -89,7 +92,8 @@ export function Composer({
       value={value}
       onChange={handleChange}
       onSubmit={(segments) => {
-        submitNow(toDraft(segments).text);
+        const next = toDraft(segments);
+        submitNow(next.text, next.agentId);
       }}
     />
   );
@@ -181,7 +185,7 @@ function SendButton({ disabled, label }: { disabled: boolean; label: string }) {
   );
 }
 
-function useComposerCatalog(): {
+function useComposerCatalog(permittedAgentIds?: readonly string[]): {
   agents: ReturnType<typeof toAgentOptions>;
   commands: ReturnType<typeof toCommandOptions>;
 } {
@@ -201,7 +205,7 @@ function useComposerCatalog(): {
     },
   });
   return {
-    agents: toAgentOptions(agents.data),
+    agents: toAgentOptions(agents.data, permittedAgentIds),
     commands: toCommandOptions(skills.data, PLACEHOLDER_COMMANDS),
   };
 }

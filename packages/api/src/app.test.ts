@@ -1,4 +1,9 @@
-import { DEFAULT_ALLOW_POLICY, matchesToken } from '@gabot/common';
+import {
+  DEFAULT_ALLOW_POLICY,
+  matchesToken,
+  personalChannelId,
+  rootAuthority,
+} from '@gabot/common';
 import { describe, expect, it } from 'vitest';
 
 import { createApiApp } from './app.js';
@@ -6,11 +11,12 @@ import { SCHEMA_SQL } from './db/schema-sql.js';
 import * as schema from './db/schema.js';
 import { runGatewayAction } from './gateway.js';
 import { MemoryStore } from './store/memory-store.js';
-import { createScriptedAgentRunner, executeTurn } from './turns.js';
+import { createScriptedAgentRunner, executeRun, executeTurn } from './turns.js';
 
 import type { PeopleAuthPort, SandboxPort } from '@gabot/common';
 
 const person = { id: 'user-1', email: 'admin@example.com', name: 'Admin' };
+const defaultChannel = personalChannelId(person.id);
 
 const peopleAuth: PeopleAuthPort = {
   verifyIdToken: (token: string) => {
@@ -111,7 +117,7 @@ describe('control plane', () => {
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
-      channelId: 'general',
+      channelId: defaultChannel,
       message: 'please navigate to example.com',
     });
     expect(result.toolNames).toContain('computer_navigate');
@@ -150,6 +156,10 @@ describe('control plane', () => {
     expect(mastra).toBeGreaterThan(extension);
     expect(schema.users).toBeDefined();
     expect(schema.actionPolicy).toBeDefined();
+    expect(schema.workspaces).toBeDefined();
+    expect(schema.organizationMembers).toBeDefined();
+    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS runs');
+    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS organization_members');
     expect(DEFAULT_ALLOW_POLICY.allow).toEqual(['true']);
   });
 
@@ -163,17 +173,24 @@ describe('control plane', () => {
     ).toBe(401);
     const channels = await app.request('/api/channels', { headers });
     expect(channels.status).toBe(200);
+    const listed = (await channels.json()) as { channels: Array<{ id: string }> };
+    const channelId = listed.channels[0]?.id;
+    expect(channelId).toBeTruthy();
     const missing = await app.request('/api/channels/nope/messages', { headers });
     expect(missing.status).toBe(404);
-    const messages = await app.request('/api/channels/general/messages', { headers });
+    const messages = await app.request(`/api/channels/${channelId}/messages`, { headers });
     expect(messages.status).toBe(200);
-    const turn = await app.request('/api/channels/general/turns', {
+    const turn = await app.request(`/api/channels/${channelId}/turns`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ message: 'hello' }),
     });
     expect(turn.status).toBe(200);
     expect(turn.headers.get('content-type')).toContain('text/event-stream');
+    const participants = await app.request(`/api/channels/${channelId}/participants`, { headers });
+    expect(participants.status).toBe(200);
+    const events = await app.request(`/api/channels/${channelId}/events`, { headers });
+    expect(events.status).toBe(200);
     const shot = await app.request('/api/computers/general-assistant/screenshot', {
       method: 'POST',
       headers,
@@ -187,7 +204,7 @@ describe('control plane', () => {
     const handoff = await app.request('/api/internal/handoff', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': 'worker' },
-      body: JSON.stringify({ channelId: 'general', text: 'A person replied.' }),
+      body: JSON.stringify({ channelId, text: 'A person replied.' }),
     });
     expect(handoff.status).toBe(200);
     expect((await app.request('/api/internal/handoff', { method: 'POST' })).status).toBe(401);
@@ -211,6 +228,7 @@ describe('control plane', () => {
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
+      channelId: defaultChannel,
       toolName: 'ask_person',
       args: { prompt: 'Need help' },
     });
@@ -238,7 +256,7 @@ describe('control plane', () => {
       id: 'r1',
       ownerUserId: person.id,
       agentId: 'general-assistant',
-      channelId: 'general',
+      channelId: defaultChannel,
       instruction: 'ping',
       cron: '* * * * *',
       enabled: true,
@@ -262,7 +280,7 @@ describe('control plane', () => {
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
-      channelId: 'general',
+      channelId: defaultChannel,
       message: 'please create a bot named Research',
     });
     expect(result.toolNames).toContain('create_bot');
@@ -289,7 +307,7 @@ describe('control plane', () => {
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
-      channelId: 'general',
+      channelId: defaultChannel,
       message: 'schedule a task every minute to say hello',
     });
     expect(result.toolNames).toContain('create_routine');
@@ -388,7 +406,7 @@ describe('control plane', () => {
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
-      channelId: 'general',
+      channelId: defaultChannel,
       message: 'schedule a task every minute to say hello',
     });
     const updated = await executeTurn({
@@ -397,11 +415,210 @@ describe('control plane', () => {
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
-      channelId: 'general',
+      channelId: defaultChannel,
       message: 'change the say hello routine to say hi',
     });
     expect(updated.toolNames).toContain('update_routine');
     const routines = await store.listRoutinesFor(person.id);
     expect(routines[0]?.instruction).toBe('say hi');
   });
+
+  it('provisions a personal workspace and channel per user', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser({ id: 'user-2', email: 'other@example.com', name: 'Other' }, []);
+    const first = await store.getWorkspaceForUser(person.id);
+    const second = await store.getWorkspaceForUser('user-2');
+    expect(first?.ownerUserId).toBe(person.id);
+    expect(second?.ownerUserId).toBe('user-2');
+    expect(first?.id).not.toBe(second?.id);
+    expect(first?.defaultChannelId).not.toBe(second?.defaultChannelId);
+  });
+
+  it('persists a root Run for an interactive turn', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    const result = await executeTurn({
+      store,
+      sandbox: sandbox([]),
+      agent: createScriptedAgentRunner(),
+      mcpUrl: 'http://mcp.test',
+      user: { ...person, isAdmin: true },
+      channelId: defaultChannel,
+      message: 'hello',
+    });
+    const run = await store.getRun(result.runId);
+    expect(run?.status).toBe('succeeded');
+    expect(run?.parentRunId).toBeNull();
+    expect(run?.botId).toBe('general-assistant');
+  });
+
+  it('treats a leading @mention as the root bot', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    const result = await executeTurn({
+      store,
+      sandbox: sandbox([]),
+      agent: createScriptedAgentRunner(),
+      mcpUrl: 'http://mcp.test',
+      user: { ...person, isAdmin: true },
+      channelId: defaultChannel,
+      message: '@monitor inspect production errors from the last 24 hours',
+    });
+    const run = await store.getRun(result.runId);
+    expect(run?.botId).toBe('monitor');
+    expect(result.toolNames).toContain('delegate_to_bot');
+  });
+
+  it('delegates monitor to triage to coder through durable child runs', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    const deps = {
+      store,
+      sandbox: sandbox([]),
+      agent: createScriptedAgentRunner(),
+      mcpUrl: 'http://mcp.test',
+      user: { ...person, isAdmin: true },
+    };
+    const result = await executeTurn({
+      ...deps,
+      channelId: defaultChannel,
+      botId: 'monitor',
+      message: 'inspect production errors from the last 24 hours',
+    });
+    expect(result.toolNames).toContain('delegate_to_bot');
+    await drainRuns(deps);
+    const runs = await store.listRunsForChannel(defaultChannel);
+    expect(runs.filter((row) => row.status === 'succeeded')).toHaveLength(3);
+    const hops = await store.listDelegationsForParent(result.runId);
+    expect(hops).toHaveLength(1);
+    expect(hops[0]?.toBotId).toBe('triage');
+    const nested = await store.listDelegationsForParent(hops[0]?.childRunId ?? '');
+    expect(nested[0]?.toBotId).toBe('coder');
+    const events = await store.listChannelEvents(defaultChannel);
+    expect(events.some((row) => row.type === 'agent.delegation.requested')).toBe(true);
+    expect(events.some((row) => row.type === 'agent.delegation.completed')).toBe(true);
+  });
+
+  it('reclaims a queued child run after a worker restart', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    const deps = {
+      store,
+      sandbox: sandbox([]),
+      agent: createScriptedAgentRunner(),
+      mcpUrl: 'http://mcp.test',
+      user: { ...person, isAdmin: true },
+    };
+    await executeTurn({
+      ...deps,
+      channelId: defaultChannel,
+      botId: 'monitor',
+      message: 'inspect production errors from the last 24 hours',
+    });
+    const lost = await store.claimWork('dead', 10);
+    expect(lost[0]?.kind).toBe('run.execute');
+    const later = new Date(Date.now() + 6 * 60_000);
+    const reclaimed = await store.claimWork('alive', 10, later);
+    expect(reclaimed).toHaveLength(1);
+    const runId =
+      typeof reclaimed[0]?.payload.runId === 'string'
+        ? reclaimed[0].payload.runId
+        : (reclaimed[0]?.key ?? '');
+    const child = await executeRun({ ...deps, runId });
+    expect(child.runId).toBe(runId);
+    const run = await store.getRun(runId);
+    expect(run?.status).toBe('succeeded');
+    const app = appWith(store);
+    const internal = await app.request('/api/internal/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': 'worker' },
+      body: JSON.stringify({ runId }),
+    });
+    expect(internal.status).toBe(200);
+  });
+
+  it('denies a child tool that is outside the parent envelope', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    const workspace = await store.getWorkspaceForUser(person.id);
+    expect(workspace).toBeTruthy();
+    const run = await store.createRun({
+      workspaceId: workspace?.id ?? '',
+      projectId: workspace?.projectId ?? '',
+      channelId: defaultChannel,
+      botId: 'coder',
+      ownerUserId: person.id,
+      triggerType: 'delegation',
+      status: 'running',
+      objective: 'navigate',
+      authority: rootAuthority(['delegate_to_bot']),
+      depth: 1,
+    });
+    const result = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'coder',
+      toolName: 'computer_navigate',
+      args: { url: 'https://example.com' },
+      channelId: defaultChannel,
+      run,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.output.toLowerCase()).toContain('not authorized');
+  });
+
+  it('refuses a fourth delegation hop', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    const workspace = await store.getWorkspaceForUser(person.id);
+    const run = await store.createRun({
+      workspaceId: workspace?.id ?? '',
+      projectId: workspace?.projectId ?? '',
+      channelId: defaultChannel,
+      botId: 'monitor',
+      ownerUserId: person.id,
+      triggerType: 'interactive',
+      status: 'running',
+      objective: 'go deeper',
+      authority: rootAuthority(['delegate_to_bot']),
+      depth: 3,
+    });
+    const result = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'monitor',
+      toolName: 'delegate_to_bot',
+      args: { botId: 'triage', objective: 'too deep' },
+      channelId: defaultChannel,
+      run,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.output.toLowerCase()).toContain('depth');
+  });
 });
+
+async function drainRuns(deps: {
+  agent: ReturnType<typeof createScriptedAgentRunner>;
+  mcpUrl: string;
+  sandbox: ReturnType<typeof sandbox>;
+  store: MemoryStore;
+  user: { email: string; id: string; isAdmin: boolean; name: string };
+}): Promise<void> {
+  for (let step = 0; step < 8; step += 1) {
+    const items = await deps.store.claimWork(`drain-${String(step)}`, 10);
+    const jobs = items.filter((item) => item.kind === 'run.execute');
+    if (jobs.length === 0) {
+      return;
+    }
+    for (const item of jobs) {
+      const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
+      await executeRun({ ...deps, runId });
+      await deps.store.finishWork(item.kind, item.key);
+    }
+  }
+}
