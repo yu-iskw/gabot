@@ -16,8 +16,6 @@ const MCP_RE = /mcp|echo/i;
 const NAVIGATE_RE = /example\.com|navigate/i;
 const NOTE_RE = /note/i;
 const NAMED_RE = /named\s+([^,.]+)/i;
-const TASK_RE = /(?:to|that)\s+(\S.*)$/i;
-const TO_INSTRUCTION_RE = /\bto\s+(\S.*)$/i;
 
 export function decideScriptedTurn(messages: ChatMessage[]): ModelTurn {
   const last = messages.at(-1);
@@ -38,7 +36,7 @@ function matchUserTurn(content: string): ModelTurn {
   }
   if (wantsUpdateRoutine(content)) {
     const target = routineTarget(content);
-    const instruction = content.match(TO_INSTRUCTION_RE)?.[1]?.trim();
+    const instruction = captureAfterMarker(content, ['to']);
     const args: Record<string, string> = { id: target };
     if (instruction) {
       args.instruction = instruction;
@@ -80,9 +78,70 @@ function namedBot(content: string): string {
 }
 
 function scheduledInstruction(content: string): string {
-  const match = content.match(TASK_RE);
-  const instruction = match?.[1]?.trim();
-  return instruction && instruction.length > 0 ? instruction : content;
+  return captureAfterMarker(content, ['to', 'that']) ?? content;
+}
+
+/** Last whole-word marker followed by whitespace, then the remainder (no regex backtracking). */
+function captureAfterMarker(content: string, markers: string[]): string | undefined {
+  let bestStart = -1;
+  for (const marker of markers) {
+    bestStart = Math.max(bestStart, lastPayloadStart(content, marker));
+  }
+  if (bestStart < 0) {
+    return undefined;
+  }
+  const captured = content.slice(bestStart).trimEnd();
+  return captured.length > 0 ? captured : undefined;
+}
+
+function lastPayloadStart(content: string, marker: string): number {
+  const lower = content.toLowerCase();
+  let best = -1;
+  let from = 0;
+  while (from < lower.length) {
+    const at = lower.indexOf(marker, from);
+    if (at < 0) {
+      break;
+    }
+    from = at + 1;
+    best = Math.max(best, payloadStartAt(content, lower, at, marker.length));
+  }
+  return best;
+}
+
+function payloadStartAt(content: string, lower: string, at: number, markerLength: number): number {
+  const afterIndex = at + markerLength;
+  if (!isWordBoundary(lower, at, afterIndex)) {
+    return -1;
+  }
+  if (afterIndex >= content.length || !isSpace(content.charAt(afterIndex))) {
+    return -1;
+  }
+  let start = afterIndex;
+  while (start < content.length && isSpace(content.charAt(start))) {
+    start += 1;
+  }
+  return start < content.length ? start : -1;
+}
+
+function isWordBoundary(lower: string, start: number, end: number): boolean {
+  const beforeOk = start === 0 || !isWordChar(lower.charAt(start - 1));
+  const afterOk = end >= lower.length || !isWordChar(lower.charAt(end));
+  return beforeOk && afterOk;
+}
+
+function isWordChar(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0;
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    code === 95
+  );
+}
+
+function isSpace(char: string): boolean {
+  return char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '\f';
 }
 
 function routineTarget(content: string): string {
