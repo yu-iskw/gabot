@@ -44,7 +44,7 @@ import type {
 import type { ActionPolicy, AuthorityEnvelope, VerifiedPerson } from '@gabot/common';
 
 type Sql = ReturnType<typeof postgres>;
-type QuerySql = postgres.Sql;
+type TxSql = postgres.TransactionSql;
 
 export class PostgresStore implements GabotStore {
   public constructor(private readonly sql: Sql) {}
@@ -447,11 +447,13 @@ export class PostgresStore implements GabotStore {
       throw new Error('Workspace not found.');
     }
     const id = `channel_${crypto.randomUUID()}`;
-    await this.sql`
-      INSERT INTO channels (id, name, description, project_id)
-      VALUES (${id}, ${input.name}, '', ${workspace.projectId})
-    `;
-    await this.attachChannelParties(this.sql, id, input.userId, input.agentId);
+    await this.sql.begin(async (sql) => {
+      await sql`
+        INSERT INTO channels (id, name, description, project_id)
+        VALUES (${id}, ${input.name}, '', ${workspace.projectId})
+      `;
+      await this.attachChannelParties(sql, id, input.userId, input.agentId);
+    });
     return { id, name: input.name, description: '', lastMessage: null };
   }
 
@@ -921,7 +923,7 @@ export class PostgresStore implements GabotStore {
     });
   }
 
-  private async retireSharedGeneral(sql: QuerySql, userId: string): Promise<void> {
+  private async retireSharedGeneral(sql: TxSql, userId: string): Promise<void> {
     await Promise.all([
       sql`
         DELETE FROM channel_memberships WHERE channel_id = 'general' AND user_id = ${userId}
@@ -934,7 +936,7 @@ export class PostgresStore implements GabotStore {
   }
 
   private async attachChannelParties(
-    sql: QuerySql,
+    sql: TxSql,
     channelId: string,
     userId: string,
     extraBotId?: string,
