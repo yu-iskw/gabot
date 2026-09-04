@@ -10,7 +10,6 @@
     "verbatimModuleSyntax": true,
     "types": ["vite/client"],
     "lib": ["ES2023", "DOM"],
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }

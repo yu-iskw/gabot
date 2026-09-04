@@ -6,8 +6,8 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages ./packages
 COPY e2e ./e2e
 COPY examples ./examples
-RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @gabot/app build
+RUN pnpm install --frozen-lockfile \
+  && pnpm --filter @gabot/app build
 
 FROM node:24.13.0-bookworm-slim
 RUN corepack enable

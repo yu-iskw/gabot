@@ -8,8 +8,8 @@ COPY packages ./packages
 COPY e2e ./e2e
 COPY examples ./examples
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @gabot/computer... build
+RUN pnpm install --frozen-lockfile \
+  && pnpm --filter @gabot/computer... build
 
 FROM mcr.microsoft.com/playwright:v1.55.1-noble
 WORKDIR /app
