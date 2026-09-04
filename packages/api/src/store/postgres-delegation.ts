@@ -27,8 +27,9 @@ async function writeDelegatedChild(sql: TxSql, input: DelegatedChildInput): Prom
   const counts = await sql<{ child_count: string; root_count: string }[]>`
     SELECT
       count(*) FILTER (WHERE parent_run_id = ${parent.id})::text AS child_count,
-      count(*) FILTER (WHERE root_run_id = ${parent.rootRunId})::text AS root_count
+      count(*)::text AS root_count
     FROM runs
+    WHERE root_run_id = ${parent.rootRunId}
   `;
   const budget = assertDelegationBudget({
     depth: parent.depth,

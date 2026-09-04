@@ -518,8 +518,7 @@ export class MemoryStore implements GabotStore {
     const parent = input.parent;
     const budget = assertDelegationBudget({
       depth: parent.depth,
-      childCount: await this.countChildRuns(parent.id),
-      rootRunCount: await this.countRunsForRoot(parent.rootRunId),
+      ...this.countDelegationBudget(parent),
     });
     if (!budget.ok) {
       throw new DelegationBudgetError(budget.reason);
@@ -709,12 +708,21 @@ export class MemoryStore implements GabotStore {
     this.routines.push(routine);
   }
 
-  private async countRunsForRoot(rootRunId: string): Promise<number> {
-    return [...this.runs.values()].filter((row) => row.rootRunId === rootRunId).length;
-  }
-
-  private async countChildRuns(parentRunId: string): Promise<number> {
-    return [...this.runs.values()].filter((row) => row.parentRunId === parentRunId).length;
+  private countDelegationBudget(parent: RunRecord): {
+    childCount: number;
+    rootRunCount: number;
+  } {
+    let childCount = 0;
+    let rootRunCount = 0;
+    for (const row of this.runs.values()) {
+      if (row.parentRunId === parent.id) {
+        childCount += 1;
+      }
+      if (row.rootRunId === parent.rootRunId) {
+        rootRunCount += 1;
+      }
+    }
+    return { childCount, rootRunCount };
   }
 
   private async createDelegation(input: {

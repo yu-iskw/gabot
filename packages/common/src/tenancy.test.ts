@@ -53,7 +53,7 @@ describe('parseBotIdentityContent', () => {
   });
 
   it('ignores other system text', () => {
-    expect(parseBotIdentityContent('You are .')).toBeUndefined();
+    expect(parseBotIdentityContent(botIdentityContent(''))).toBeUndefined();
     expect(parseBotIdentityContent('hello')).toBeUndefined();
   });
 });

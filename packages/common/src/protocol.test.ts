@@ -7,6 +7,7 @@ import { asRecord, asString, asStringArray } from './json-value.js';
 import { createOpenAiCompatibleModel, toOpenAiMessages } from './openai-model.js';
 import { runModelAsAgui } from './run-model-agui.js';
 import { decideScriptedTurn } from './scripted-turn.js';
+import { botIdentityContent } from './tenancy.js';
 import { matchesToken, offeredBearer } from './token.js';
 import {
   COMPUTER_NAVIGATE,
@@ -125,7 +126,7 @@ describe('decideScriptedTurn', () => {
 
   it('delegates monitor production work to triage', () => {
     const turn = decideScriptedTurn([
-      { role: 'system', content: 'You are monitor.' },
+      { role: 'system', content: botIdentityContent('monitor') },
       { role: 'user', content: 'inspect production errors from the last 24 hours' },
     ]);
     expect(turn.toolCalls[0]?.name).toBe(DELEGATE_TO_BOT);
@@ -134,12 +135,12 @@ describe('decideScriptedTurn', () => {
 
   it('has triage delegate to coder and coder reply in text', () => {
     const triage = decideScriptedTurn([
-      { role: 'system', content: 'You are triage.' },
+      { role: 'system', content: botIdentityContent('triage') },
       { role: 'user', content: 'Triage production errors from the last 24 hours.' },
     ]);
     expect(triage.toolCalls[0]?.arguments.botId).toBe('coder');
     const coder = decideScriptedTurn([
-      { role: 'system', content: 'You are coder.' },
+      { role: 'system', content: botIdentityContent('coder') },
       { role: 'user', content: 'Implement a fix for the triaged production issues.' },
     ]);
     expect(coder.text.toLowerCase()).toContain('coding');
