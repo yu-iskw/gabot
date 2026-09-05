@@ -155,7 +155,7 @@ function paneDetail(
 ) {
   switch (pane) {
     case 'settings': {
-      return <ChannelSettings botId={botId} channelId={channelId} name={channelName} />;
+      return <ChannelSettings botId={botId} channelId={channelId} />;
     }
     case 'watch': {
       return <ComputerPanel botId={botId} name={channelName} />;
@@ -170,18 +170,11 @@ function paneDetail(
   }
 }
 
-function ChannelSettings({
-  botId,
-  channelId,
-  name,
-}: {
-  botId: string;
-  channelId: string;
-  name: string;
-}) {
-  const { token } = useAuth();
+function ChannelSettings({ botId, channelId }: { botId: string; channelId: string }) {
+  const { token, user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const isDefaultGeneral = Boolean(user && channelId === `ch-${user.uid}-general`);
   const archive = useMutation({
     mutationFn: async () =>
       apiJson(`/api/channels/${channelId}/archive`, await token(), { method: 'POST' }),
@@ -194,7 +187,7 @@ function ChannelSettings({
     <div className="flex w-full flex-col gap-6 p-6">
       <ChannelRoster channelId={channelId} />
       <ChannelPolicies channelId={channelId} />
-      {name === 'General' ? null : (
+      {isDefaultGeneral ? null : (
         <Button
           data-testid="archive-channel"
           disabled={archive.isPending}

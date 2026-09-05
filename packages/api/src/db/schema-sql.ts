@@ -397,6 +397,10 @@ FROM users u
 CROSS JOIN (
   VALUES ('general-assistant'), ('monitor'), ('triage'), ('coder')
 ) AS b(id)
+WHERE NOT EXISTS (
+  SELECT 1 FROM channel_participants p
+  WHERE p.channel_id = 'ch-' || u.id || '-general' AND p.principal_type = 'bot'
+)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO connections (id, workspace_id, owner_user_id, provider, credential_ref, status)

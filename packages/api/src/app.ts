@@ -824,10 +824,11 @@ async function botParticipantOrError(
   store: GabotStore,
   agentId: string,
 ): Promise<{ body: Record<string, unknown>; ok: false; status: 403 | 404 } | { ok: true }> {
-  const [agent, people] = await Promise.all([store.getAgent(agentId), store.listPeople()]);
+  const agent = await store.getAgent(agentId);
   if (agent) {
     return { ok: true };
   }
+  const people = await store.listPeople();
   if (people.some((row) => row.id === agentId)) {
     return { ok: false, status: 403, body: { error: HUMANS_FORBIDDEN } };
   }

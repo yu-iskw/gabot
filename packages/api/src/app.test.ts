@@ -104,6 +104,7 @@ describe('schema sql', () => {
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS organization_members');
     expect(SCHEMA_SQL).toContain("WHERE channel_id = 'general'");
     expect(SCHEMA_SQL).toContain('FROM channel_memberships');
+    expect(SCHEMA_SQL).toContain("p.principal_type = 'bot'");
     expect(DEFAULT_ALLOW_POLICY.allow).toEqual(['true']);
     const provision = SCHEMA_SQL.indexOf("ch-' || id || '-general'");
     const retarget = SCHEMA_SQL.indexOf('UPDATE routines');
