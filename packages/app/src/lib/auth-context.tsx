@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { createFirebaseAuth } from '../firebase.js';
+
 import { syncAuthQueryCache } from './auth-query-cache.js';
 
 import type { Auth, User } from 'firebase/auth';
