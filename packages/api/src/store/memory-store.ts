@@ -784,7 +784,8 @@ export class MemoryStore implements GabotStore {
     const workspaceId = personalWorkspaceId(user.id);
     const projectId = personalProjectId(user.id);
     const channelId = personalChannelId(user.id);
-    if (!this.workspaces.has(workspaceId)) {
+    const createdWorkspace = !this.workspaces.has(workspaceId);
+    if (createdWorkspace) {
       this.workspaces.set(workspaceId, {
         id: workspaceId,
         organizationId: PLATFORM_ORG_ID,
@@ -803,14 +804,21 @@ export class MemoryStore implements GabotStore {
       });
     }
     this.attachChannelParties(channelId, user.id);
-    this.seedOwnerConnections(workspaceId, user.id);
+    this.seedOwnerConnections(workspaceId, user.id, createdWorkspace);
   }
 
-  private seedOwnerConnections(workspaceId: string, ownerUserId: string): void {
+  private seedOwnerConnections(
+    workspaceId: string,
+    ownerUserId: string,
+    seedGrants: boolean,
+  ): void {
     for (const connection of defaultOwnerConnections(workspaceId, ownerUserId)) {
       if (!this.connections.some((row) => row.id === connection.id)) {
         this.connections.push({ ...connection });
       }
+    }
+    if (!seedGrants) {
+      return;
     }
     for (const grant of defaultOwnerGrants(workspaceId, ownerUserId)) {
       if (!this.capabilityGrants.some((row) => row.id === grant.id)) {

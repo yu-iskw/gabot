@@ -967,6 +967,52 @@ describe('capability grants', () => {
     expect(allowed.ok).toBe(true);
   });
 
+  it('does not restore a revoked default grant after upsertUser or getUser', async () => {
+    const store = new MemoryStore();
+    const { run, workspace } = await ownerRun(store);
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: PROVIDER_GITHUB,
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: GITHUB_ALLOWED_REPO,
+      granted: false,
+      grantedBy: person.id,
+    });
+    await store.upsertUser(person, ['admin@example.com']);
+    await store.getUser(person.id);
+    const denied = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: GITHUB_CREATE_ISSUE,
+      args: { repo: GITHUB_ALLOWED_REPO, title: 'Outage' },
+      run,
+    });
+    expect(denied.ok).toBe(false);
+    expect(denied.matched).toBe('grant');
+  });
+
+  it('seeds the GitHub grant when a workspace is created', async () => {
+    const store = new MemoryStore();
+    const other = { id: 'user-3', email: 'third@example.com', name: 'Third' };
+    await store.upsertUser(other, []);
+    const workspace = await store.getWorkspaceForUser(other.id);
+    if (!workspace) {
+      throw new Error('workspace missing');
+    }
+    const grants = await store.listCapabilityGrants(workspace.id);
+    expect(
+      grants.some(
+        (grant) =>
+          grant.capability === CAPABILITY_GITHUB_ISSUES_CREATE &&
+          grant.resource === GITHUB_ALLOWED_REPO,
+      ),
+    ).toBe(true);
+  });
+
   it('lists owner connections', async () => {
     const store = new MemoryStore();
     const app = appWith(store);

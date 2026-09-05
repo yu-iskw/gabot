@@ -894,10 +894,11 @@ export class PostgresStore implements GabotStore {
         VALUES (${PLATFORM_ORG_ID}, ${user.id}, ${orgRole})
         ON CONFLICT DO NOTHING
       `;
-      await sql`
+      const created = await sql<{ id: string }[]>`
         INSERT INTO workspaces (id, organization_id, owner_user_id, name)
         VALUES (${workspaceId}, ${PLATFORM_ORG_ID}, ${user.id}, ${`${user.name}'s workspace`})
         ON CONFLICT (id) DO NOTHING
+        RETURNING id
       `;
       await sql`
         INSERT INTO projects (id, workspace_id, name)
@@ -912,7 +913,7 @@ export class PostgresStore implements GabotStore {
       await Promise.all([
         this.retireSharedGeneral(sql, user.id),
         this.attachChannelParties(sql, channelId, user.id),
-        insertDefaultOwnerConnections(sql, workspaceId, user.id),
+        insertDefaultOwnerConnections(sql, workspaceId, user.id, created.length > 0),
       ]);
     });
   }

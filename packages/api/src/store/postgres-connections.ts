@@ -19,9 +19,9 @@ export async function insertDefaultOwnerConnections(
   sql: TxSql,
   workspaceId: string,
   ownerUserId: string,
+  seedGrants: boolean,
 ): Promise<void> {
   const connections = defaultOwnerConnections(workspaceId, ownerUserId);
-  const grants = defaultOwnerGrants(workspaceId, ownerUserId);
   await sql`
     INSERT INTO connections ${sql(
       connections.map((connection) => ({
@@ -35,6 +35,10 @@ export async function insertDefaultOwnerConnections(
     )}
     ON CONFLICT (id) DO NOTHING
   `;
+  if (!seedGrants) {
+    return;
+  }
+  const grants = defaultOwnerGrants(workspaceId, ownerUserId);
   await sql`
     INSERT INTO capability_grants ${sql(
       grants.map((grant) => ({
