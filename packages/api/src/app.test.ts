@@ -515,7 +515,9 @@ describe('control plane', () => {
     expect(first?.id).not.toBe(second?.id);
     expect(first?.defaultChannelId).not.toBe(second?.defaultChannelId);
   });
+});
 
+describe('turns and runs', () => {
   it('persists a root Run for an interactive turn', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, ['admin@example.com']);
