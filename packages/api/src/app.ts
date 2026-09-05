@@ -302,11 +302,11 @@ const SKILL_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
 
 function registerPluginRoutes(app: Hono<{ Variables: AuthVariables }>, options: ApiOptions): void {
   app.get('/api/admin/connections', async (context) => {
-    const workspace = await options.store.getWorkspaceForUser(context.get('user').id);
-    if (!workspace) {
-      return context.json({ error: NOT_FOUND }, 404);
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
     }
-    const connections = await options.store.listOwnerConnections(workspace.id);
+    const connections = await options.store.listOwnerConnections(access.workspace.id);
     return context.json({ connections });
   });
   app.put('/api/admin/capability-grants', async (context) => {
@@ -322,14 +322,14 @@ function registerPluginRoutes(app: Hono<{ Variables: AuthVariables }>, options: 
     if (!workspace) {
       return context.json({ error: NOT_FOUND }, 404);
     }
-    return context.json({ plugins: await listPluginViews(options.store, workspace.id) });
+    return context.json({ plugins: await listPluginViews(options.store, workspace) });
   });
   app.get('/api/admin/plugins/:id', async (context) => {
     const workspace = await options.store.getWorkspaceForUser(context.get('user').id);
     if (!workspace) {
       return context.json({ error: NOT_FOUND }, 404);
     }
-    const detail = await getPluginDetail(options.store, context.req.param('id'), workspace.id);
+    const detail = await getPluginDetail(options.store, context.req.param('id'), workspace);
     if (!detail) {
       return context.json({ error: NOT_FOUND }, 404);
     }
@@ -382,7 +382,7 @@ async function writePluginGrant(
   if (!access.ok) {
     return access;
   }
-  const detail = await getPluginDetail(store, pluginId, access.workspace.id);
+  const detail = await getPluginDetail(store, pluginId, access.workspace);
   if (!detail) {
     return { status: 404, body: { error: NOT_FOUND } };
   }
@@ -432,16 +432,23 @@ async function persistCapabilityGrant(
     resource: string;
     targetId: string;
   },
-): Promise<{ body: Record<string, unknown>; status: 200 }> {
-  await store.setCapabilityGrant({
-    workspaceId: workspace.id,
-    ownerUserId: workspace.ownerUserId,
-    provider: input.provider,
-    capability: input.capability,
-    resource: input.resource,
-    granted: input.granted,
-    grantedBy: user.id,
-  });
+): Promise<{ body: Record<string, unknown>; status: 200 | 404 }> {
+  try {
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: input.provider,
+      capability: input.capability,
+      resource: input.resource,
+      granted: input.granted,
+      grantedBy: user.id,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Connection not found.') {
+      return { status: 404, body: { error: NOT_FOUND } };
+    }
+    throw error;
+  }
   await store.insertAudit({
     actorUserId: user.id,
     eventType: input.eventType,

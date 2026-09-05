@@ -15,7 +15,7 @@ describe('plugin views', () => {
     if (!workspace) {
       throw new Error('workspace missing');
     }
-    const listed = await listPluginViews(store, workspace.id);
+    const listed = await listPluginViews(store, workspace);
     expect(listed).toEqual([
       expect.objectContaining({
         id: 'mock',
@@ -42,8 +42,8 @@ describe('plugin views', () => {
       granted: true,
       grantedBy: 'admin',
     });
-    const detail = await getPluginDetail(store, 'mock', workspace.id);
+    const detail = await getPluginDetail(store, 'mock', workspace);
     expect(detail?.tools.find((tool) => tool.name === 'echo')?.granted).toBe(true);
-    expect(await getPluginDetail(store, 'missing', workspace.id)).toBeNull();
+    expect(await getPluginDetail(store, 'missing', workspace)).toBeNull();
   });
 });

@@ -1,6 +1,13 @@
-import { mcpCapabilityForRef } from '@gabot/common';
+import { matchCapabilityGrant, mcpCapabilityForRef } from '@gabot/common';
 
-import type { CapabilityGrantRecord, GabotStore, PluginRecord, PluginTool } from './store/types.js';
+import type {
+  CapabilityGrantRecord,
+  GabotStore,
+  OwnerConnectionRecord,
+  PluginRecord,
+  PluginTool,
+  WorkspaceRecord,
+} from './store/types.js';
 
 type PluginListItem = PluginRecord & {
   grantedCount: number;
@@ -16,18 +23,24 @@ type PluginDetail = {
   tools: PluginToolView[];
 };
 
+type WorkspaceScope = Pick<WorkspaceRecord, 'id' | 'ownerUserId'>;
+
 export async function listPluginViews(
   store: GabotStore,
-  workspaceId: string,
+  workspace: WorkspaceScope,
 ): Promise<PluginListItem[]> {
-  const [plugins, grants] = await Promise.all([
+  const [plugins, context] = await Promise.all([
     store.listPlugins(),
-    store.listCapabilityGrants(workspaceId),
+    grantContext(store, workspace.id),
   ]);
   const items: PluginListItem[] = [];
   for (const plugin of plugins) {
     const tools = await store.listPluginTools(plugin.id);
-    items.push(toListItem(plugin, tools, grants));
+    items.push({
+      ...plugin,
+      toolCount: tools.length,
+      grantedCount: tools.filter((tool) => toolGranted(workspace, context, tool.ref)).length,
+    });
   }
   return items;
 }
@@ -35,36 +48,48 @@ export async function listPluginViews(
 export async function getPluginDetail(
   store: GabotStore,
   id: string,
-  workspaceId: string,
+  workspace: WorkspaceScope,
 ): Promise<PluginDetail | null> {
   const plugins = await store.listPlugins();
   const plugin = plugins.find((row) => row.id === id);
   if (!plugin) {
     return null;
   }
-  const [tools, grants] = await Promise.all([
+  const [tools, context] = await Promise.all([
     store.listPluginTools(id),
-    store.listCapabilityGrants(workspaceId),
+    grantContext(store, workspace.id),
   ]);
   return {
     plugin,
     tools: tools.map((tool) => ({
       ...tool,
-      granted: grantHeld(grants, tool.ref),
+      granted: toolGranted(workspace, context, tool.ref),
     })),
   };
 }
 
-function grantHeld(grants: CapabilityGrantRecord[], ref: string): boolean {
-  const capability = mcpCapabilityForRef(ref);
-  return grants.some((grant) => grant.capability === capability && grant.resource === ref);
+async function grantContext(
+  store: GabotStore,
+  workspaceId: string,
+): Promise<{ connections: OwnerConnectionRecord[]; grants: CapabilityGrantRecord[] }> {
+  const [connections, grants] = await Promise.all([
+    store.listOwnerConnections(workspaceId),
+    store.listCapabilityGrants(workspaceId),
+  ]);
+  return { connections, grants };
 }
 
-function toListItem(
-  plugin: PluginRecord,
-  tools: PluginTool[],
-  grants: CapabilityGrantRecord[],
-): PluginListItem {
-  const grantedCount = tools.filter((tool) => grantHeld(grants, tool.ref)).length;
-  return { ...plugin, toolCount: tools.length, grantedCount };
+function toolGranted(
+  workspace: WorkspaceScope,
+  context: { connections: OwnerConnectionRecord[]; grants: CapabilityGrantRecord[] },
+  ref: string,
+): boolean {
+  return matchCapabilityGrant({
+    workspaceId: workspace.id,
+    ownerUserId: workspace.ownerUserId,
+    capability: mcpCapabilityForRef(ref),
+    resource: ref,
+    connections: context.connections,
+    grants: context.grants,
+  }).ok;
 }

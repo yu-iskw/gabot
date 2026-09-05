@@ -11,7 +11,7 @@ type PluginDetail = {
     description: string;
     granted: boolean;
     name: string;
-    resource: string;
+    ref: string;
   }>;
 };
 

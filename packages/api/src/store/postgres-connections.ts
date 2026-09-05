@@ -92,21 +92,24 @@ export async function selectCapabilityGrants(
 
 export async function upsertCapabilityGrant(sql: Sql, input: CapabilityGrantWrite): Promise<void> {
   const connectionId = ownerConnectionId(input.workspaceId, input.provider);
-  const owned = await sql<{ id: string }[]>`
-    SELECT id FROM connections
-    WHERE id = ${connectionId} AND owner_user_id = ${input.ownerUserId}
-  `;
-  if (!owned.at(0)) {
-    throw new Error('Connection not found.');
-  }
   const id = capabilityGrantId(connectionId, input.capability, input.resource);
-  if (input.granted) {
-    await sql`
-      INSERT INTO capability_grants (id, connection_id, capability, resource, granted_by)
-      VALUES (${id}, ${connectionId}, ${input.capability}, ${input.resource}, ${input.grantedBy})
-      ON CONFLICT (id) DO NOTHING
+  await sql.begin(async (tx) => {
+    const owned = await tx<{ id: string }[]>`
+      SELECT id FROM connections
+      WHERE id = ${connectionId} AND owner_user_id = ${input.ownerUserId}
+      FOR UPDATE
     `;
-    return;
-  }
-  await sql`DELETE FROM capability_grants WHERE id = ${id}`;
+    if (!owned.at(0)) {
+      throw new Error('Connection not found.');
+    }
+    if (input.granted) {
+      await tx`
+        INSERT INTO capability_grants (id, connection_id, capability, resource, granted_by)
+        VALUES (${id}, ${connectionId}, ${input.capability}, ${input.resource}, ${input.grantedBy})
+        ON CONFLICT (id) DO NOTHING
+      `;
+      return;
+    }
+    await tx`DELETE FROM capability_grants WHERE id = ${id}`;
+  });
 }
