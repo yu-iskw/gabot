@@ -15,6 +15,7 @@ import { DetailPanel } from './components/layout/detail-panel.js';
 import { SidebarToggle } from './components/layout/sidebar-toggle.js';
 import { Button } from './components/ui/button.js';
 import { useAuth } from './lib/auth-context.js';
+import { personalChannelId } from './lib/personal-channel.js';
 
 import type { ChannelPane } from './lib/channel-pane.js';
 import type { NamedProject } from './lib/project-channels.js';
@@ -174,7 +175,7 @@ function ChannelSettings({ botId, channelId }: { botId: string; channelId: strin
   const { token, user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const isDefaultGeneral = Boolean(user && channelId === `ch-${user.uid}-general`);
+  const isDefaultGeneral = Boolean(user && channelId === personalChannelId(user.uid));
   const archive = useMutation({
     mutationFn: async () =>
       apiJson(`/api/channels/${channelId}/archive`, await token(), { method: 'POST' }),

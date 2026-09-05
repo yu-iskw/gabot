@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 
@@ -8,10 +8,10 @@ import { Composer } from '../components/channels/composer.js';
 import { SidebarToggleBar } from '../components/layout/sidebar-toggle.js';
 import { Input } from '../components/ui/input.js';
 import { useAuth } from '../lib/auth-context.js';
+import { resolveProjectId } from '../lib/resolve-project-id.js';
 
 import type { Coworker } from '../lib/agents.js';
 import type { NamedProject } from '../lib/project-channels.js';
-import type { QueryClient } from '@tanstack/react-query';
 
 export function HomePage() {
   const { token } = useAuth();
@@ -38,16 +38,13 @@ export function HomePage() {
 
   const openAgent = useMutation({
     mutationFn: async (agent: Coworker) => {
-      const created = await apiJson<{ channel: { id: string } }>('/api/channels', await token(), {
-        method: 'POST',
-        body: JSON.stringify({
-          name: agent.title || agent.name,
-          agentId: agent.id,
-          projectId: selectedProject || undefined,
-          description: description || undefined,
-        }),
+      const auth = await token();
+      return createChannel(auth, {
+        name: agent.title || agent.name,
+        agentId: agent.id,
+        projectId: await projectIdForCreate(auth, selectedProject, newProjectName, queryClient),
+        description: description || undefined,
       });
-      return created.channel.id;
     },
     onSuccess: async (channelId) => {
       await queryClient.invalidateQueries({ queryKey: ['channels'] });
@@ -57,28 +54,19 @@ export function HomePage() {
   const start = useMutation({
     mutationFn: async (input: { botId: string | null; message: string }) => {
       const auth = await token();
-      const targetProjectId = await resolveProjectId(
-        auth,
-        selectedProject,
-        newProjectName,
-        queryClient,
-      );
-      const created = await apiJson<{ channel: { id: string } }>('/api/channels', auth, {
-        method: 'POST',
-        body: JSON.stringify({
-          name: channelNameFrom(input.message),
-          agentId: input.botId || undefined,
-          projectId: targetProjectId,
-          description: description || undefined,
-        }),
+      const channelId = await createChannel(auth, {
+        name: channelNameFrom(input.message),
+        agentId: input.botId || undefined,
+        projectId: await projectIdForCreate(auth, selectedProject, newProjectName, queryClient),
+        description: description || undefined,
       });
       await readTurnStream(
-        `/api/channels/${created.channel.id}/turns`,
+        `/api/channels/${channelId}/turns`,
         await token(),
         input.message,
         input.botId,
       );
-      return created.channel.id;
+      return channelId;
     },
     onSuccess: async (channelId) => {
       await queryClient.invalidateQueries({ queryKey: ['channels'] });
@@ -169,20 +157,29 @@ function channelNameFrom(message: string): string {
   return words.length > 0 ? words : 'New channel';
 }
 
-async function resolveProjectId(
+async function projectIdForCreate(
   token: string,
   selectedProject: string,
   newProjectName: string,
   queryClient: QueryClient,
 ): Promise<string | undefined> {
-  const name = newProjectName.trim();
-  if (!name) {
-    return selectedProject || undefined;
-  }
-  const created = await apiJson<{ project: { id: string } }>('/api/projects', token, {
-    method: 'POST',
-    body: JSON.stringify({ name }),
+  return resolveProjectId(selectedProject, newProjectName, async (name) => {
+    const created = await apiJson<{ project: { id: string } }>('/api/projects', token, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+    await queryClient.invalidateQueries({ queryKey: ['projects'] });
+    return created.project.id;
   });
-  await queryClient.invalidateQueries({ queryKey: ['projects'] });
-  return created.project.id;
+}
+
+async function createChannel(
+  token: string,
+  body: { agentId?: string; description?: string; name: string; projectId?: string },
+): Promise<string> {
+  const created = await apiJson<{ channel: { id: string } }>('/api/channels', token, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return created.channel.id;
 }

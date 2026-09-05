@@ -236,23 +236,14 @@ function registerChannelMutationRoutes(
     if (!allowed.ok) {
       return context.json(allowed.body, allowed.status);
     }
-    await options.store.addChannelParticipant({
+    const participant = {
       channelId: owned.channel.id,
-      principalType: 'bot',
+      principalType: 'bot' as const,
       principalId: agentId,
       role: 'bot',
-    });
-    return context.json(
-      {
-        participant: {
-          channelId: owned.channel.id,
-          principalType: 'bot',
-          principalId: agentId,
-          role: 'bot',
-        },
-      },
-      201,
-    );
+    };
+    await options.store.addChannelParticipant(participant);
+    return context.json({ participant }, 201);
   });
   app.delete('/api/channels/:id/participants/:agentId', async (context) => {
     const owned = await requireOwnedChannel(

@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import { CAPABILITY_GITHUB_ISSUES_CREATE, GITHUB_ALLOWED_REPO } from './capability-grant.js';
 import { matchChannelPolicy } from './channel-policy.js';
+import { personalChannelId } from './tenancy.js';
 
-const channelId = 'ch-user-1-general';
+const channelId = personalChannelId('user-1');
 
 describe('matchChannelPolicy', () => {
   it('inherits the workspace grant when the channel has no rows for the capability', () => {

@@ -8,10 +8,12 @@ import { Input } from '../ui/input.js';
 
 type PolicyRow = { capability: string; resource: string };
 
+const DEFAULT_POLICY_CAPABILITY = 'github.issues.create';
+
 export function ChannelPolicies({ channelId }: { channelId: string }) {
   const { token } = useAuth();
   const queryClient = useQueryClient();
-  const [capability, setCapability] = useState('github.issues.create');
+  const [capability, setCapability] = useState(DEFAULT_POLICY_CAPABILITY);
   const [resource, setResource] = useState('');
   const policies = useQuery({
     queryKey: ['channel-policies', channelId],

@@ -17,6 +17,7 @@ import { useState } from 'react';
 import { apiJson } from '../api.js';
 import { useAuth } from '../lib/auth-context.js';
 import { matchingChannels } from '../lib/channel-search.js';
+import { personalChannelId } from '../lib/personal-channel.js';
 import { groupChannelsByProject } from '../lib/project-channels.js';
 import { useSidebar } from '../lib/sidebar-context.js';
 import { cn } from '../lib/utils.js';
@@ -108,7 +109,11 @@ export function AppSidebar() {
                     to="/channel/$channelId"
                     params={{ channelId: channel.id }}
                     search={{}}
-                    data-testid={channel.name === 'General' ? 'channel-general' : undefined}
+                    data-testid={
+                      user && channel.id === personalChannelId(user.uid)
+                        ? 'channel-general'
+                        : undefined
+                    }
                     className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-sidebar-accent"
                   >
                     <ChannelAvatar name={channel.name} size={32} />
