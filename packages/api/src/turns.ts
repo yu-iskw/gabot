@@ -99,6 +99,9 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
   if (!participating) {
     throw new TurnClientError(`Bot ${botId} is not a participant on channel ${input.channelId}.`);
   }
+  if (input.user.id !== scope.ownerUserId) {
+    throw new TurnClientError('Only the workspace owner may start a run on this channel.');
+  }
   const run = await input.store.createRun({
     workspaceId: scope.workspaceId,
     projectId: scope.projectId,

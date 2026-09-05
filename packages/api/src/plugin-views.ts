@@ -9,7 +9,6 @@ type PluginListItem = PluginRecord & {
 
 type PluginToolView = PluginTool & {
   granted: boolean;
-  resource: string;
 };
 
 type PluginDetail = {
@@ -51,7 +50,6 @@ export async function getPluginDetail(
     plugin,
     tools: tools.map((tool) => ({
       ...tool,
-      resource: tool.ref,
       granted: grantHeld(grants, tool.ref),
     })),
   };

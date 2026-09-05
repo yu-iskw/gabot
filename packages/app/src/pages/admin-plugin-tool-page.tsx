@@ -11,7 +11,6 @@ type PluginDetail = {
     description: string;
     granted: boolean;
     name: string;
-    ref: string;
     resource: string;
   }>;
 };
@@ -59,7 +58,7 @@ export function AdminPluginToolPage({
           <PageEmpty>This connector does not advertise a tool by that name.</PageEmpty>
         ) : (
           <FactRow
-            title={tool.resource}
+            title={tool.ref}
             description={
               tool.granted
                 ? 'This workspace may invoke the capability for this resource.'

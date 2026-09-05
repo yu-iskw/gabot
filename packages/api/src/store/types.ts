@@ -2,6 +2,8 @@ import {
   GENERAL_ASSISTANT_ID,
   type ActionPolicy,
   type AuthorityEnvelope,
+  type CapabilityGrant,
+  type OwnerConnection,
   type VerifiedPerson,
 } from '@gabot/common';
 
@@ -95,22 +97,8 @@ export type PluginTool = {
   ref: string;
 };
 
-export type OwnerConnectionRecord = {
-  credentialRef: string;
-  id: string;
-  ownerUserId: string;
-  provider: string;
-  status: 'active' | 'revoked';
-  workspaceId: string;
-};
-
-export type CapabilityGrantRecord = {
-  capability: string;
-  connectionId: string;
-  grantedBy: string;
-  id: string;
-  resource: string;
-};
+export type OwnerConnectionRecord = OwnerConnection;
+export type CapabilityGrantRecord = CapabilityGrant;
 
 export type CapabilityGrantWrite = {
   capability: string;

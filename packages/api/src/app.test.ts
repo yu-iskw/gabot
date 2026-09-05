@@ -800,6 +800,29 @@ describe('control plane', () => {
 });
 
 describe('capability grants', () => {
+  it('refuses a non-owner participant from starting a run that spends owner grants', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser({ id: 'user-2', email: 'other@example.com', name: 'Other' }, []);
+    await store.addChannelParticipant({
+      channelId: defaultChannel,
+      principalId: 'user-2',
+      principalType: 'user',
+      role: 'member',
+    });
+    await expect(
+      executeTurn({
+        store,
+        sandbox: sandbox([]),
+        agent: createScriptedAgentRunner(),
+        mcpUrl: 'http://mcp.test',
+        user: { id: 'user-2', email: 'other@example.com', isAdmin: false, name: 'Other' },
+        channelId: defaultChannel,
+        message: 'create an issue on acme/allowed',
+      }),
+    ).rejects.toThrow(/workspace owner/);
+  });
+
   it('refuses MCP echo until the workspace grant exists, then allows it', async () => {
     const store = new MemoryStore();
     const { run, workspace } = await ownerRun(store);

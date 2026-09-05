@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { grantSummary, pluginRowSummary } from './grant-summary.js';
-
-describe('grantSummary', () => {
-  it('names granted versus not granted', () => {
-    expect(grantSummary(false)).toBe('Not granted');
-    expect(grantSummary(true)).toBe('Granted');
-  });
-});
+import { pluginRowSummary } from './grant-summary.js';
 
 describe('pluginRowSummary', () => {
   it('pairs tool count with workspace grants', () => {

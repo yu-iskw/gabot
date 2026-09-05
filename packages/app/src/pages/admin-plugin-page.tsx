@@ -10,7 +10,6 @@ import {
 } from '../components/layout/page-shell.js';
 import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
-import { grantSummary } from '../lib/grant-summary.js';
 
 type PluginDetail = {
   plugin: { id: string; title: string; url: string; vendor: string };
@@ -57,7 +56,7 @@ export function AdminPluginPage({ pluginId }: { pluginId: string }) {
                   to={`/admin/plugins/${pluginId}/tools/${tool.name}`}
                   title={tool.name}
                   description={tool.description}
-                  summary={grantSummary(tool.granted)}
+                  summary={tool.granted ? 'Granted' : 'Not granted'}
                 />
               </div>
             ))}

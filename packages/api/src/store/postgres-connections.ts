@@ -5,7 +5,11 @@ import {
   ownerConnectionId,
 } from '@gabot/common';
 
-import type { CapabilityGrantRecord, OwnerConnectionRecord } from './types.js';
+import type {
+  CapabilityGrantRecord,
+  CapabilityGrantWrite,
+  OwnerConnectionRecord,
+} from './types.js';
 import type postgres from 'postgres';
 
 type TxSql = postgres.TransactionSql;
@@ -16,28 +20,33 @@ export async function insertDefaultOwnerConnections(
   workspaceId: string,
   ownerUserId: string,
 ): Promise<void> {
-  for (const connection of defaultOwnerConnections(workspaceId, ownerUserId)) {
-    await sql`
-      INSERT INTO connections (
-        id, workspace_id, owner_user_id, provider, credential_ref, status
-      )
-      VALUES (
-        ${connection.id}, ${connection.workspaceId}, ${connection.ownerUserId},
-        ${connection.provider}, ${connection.credentialRef}, ${connection.status}
-      )
-      ON CONFLICT (id) DO NOTHING
-    `;
-  }
-  for (const grant of defaultOwnerGrants(workspaceId, ownerUserId)) {
-    await sql`
-      INSERT INTO capability_grants (id, connection_id, capability, resource, granted_by)
-      VALUES (
-        ${grant.id}, ${grant.connectionId}, ${grant.capability}, ${grant.resource},
-        ${grant.grantedBy}
-      )
-      ON CONFLICT (id) DO NOTHING
-    `;
-  }
+  const connections = defaultOwnerConnections(workspaceId, ownerUserId);
+  const grants = defaultOwnerGrants(workspaceId, ownerUserId);
+  await sql`
+    INSERT INTO connections ${sql(
+      connections.map((connection) => ({
+        id: connection.id,
+        workspace_id: connection.workspaceId,
+        owner_user_id: connection.ownerUserId,
+        provider: connection.provider,
+        credential_ref: connection.credentialRef,
+        status: connection.status,
+      })),
+    )}
+    ON CONFLICT (id) DO NOTHING
+  `;
+  await sql`
+    INSERT INTO capability_grants ${sql(
+      grants.map((grant) => ({
+        id: grant.id,
+        connection_id: grant.connectionId,
+        capability: grant.capability,
+        resource: grant.resource,
+        granted_by: grant.grantedBy,
+      })),
+    )}
+    ON CONFLICT (id) DO NOTHING
+  `;
 }
 
 export async function selectOwnerConnections(
@@ -81,18 +90,7 @@ export async function selectCapabilityGrants(
   `;
 }
 
-export async function upsertCapabilityGrant(
-  sql: Sql,
-  input: {
-    capability: string;
-    granted: boolean;
-    grantedBy: string;
-    ownerUserId: string;
-    provider: string;
-    resource: string;
-    workspaceId: string;
-  },
-): Promise<void> {
+export async function upsertCapabilityGrant(sql: Sql, input: CapabilityGrantWrite): Promise<void> {
   const connectionId = ownerConnectionId(input.workspaceId, input.provider);
   const owned = await sql<{ id: string }[]>`
     SELECT id FROM connections

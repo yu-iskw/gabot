@@ -1,7 +1,3 @@
-export function grantSummary(granted: boolean): string {
-  return granted ? 'Granted' : 'Not granted';
-}
-
 export function pluginRowSummary(toolCount: number, grantedCount: number): string {
   if (toolCount === 0) {
     return 'No tools yet';
