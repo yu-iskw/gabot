@@ -1,6 +1,5 @@
-import { describe, expect, it } from 'vitest';
-
 import { CAPABILITY_MCP_ECHO, PROVIDER_MOCK_MCP, RESOURCE_MCP_ECHO } from '@gabot/common';
+import { describe, expect, it } from 'vitest';
 
 import { getPluginDetail, listPluginViews } from './plugin-views.js';
 import { MemoryStore } from './store/memory-store.js';
