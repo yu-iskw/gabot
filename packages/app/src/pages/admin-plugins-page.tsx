@@ -13,7 +13,7 @@ import { useAuth } from '../lib/auth-context.js';
 import { pluginRowSummary } from '../lib/grant-summary.js';
 
 type PluginListItem = {
-  botCount: number;
+  grantedCount: number;
   id: string;
   title: string;
   toolCount: number;
@@ -38,7 +38,7 @@ export function AdminPluginsPage() {
     <PageShell
       backButton={{ label: 'Admin', to: '/admin' }}
       title="Plugins"
-      description="What this deployment can reach, and which Bots may reach it. Adding a plugin is account-wide; which Bots hold its tools is decided on its own page."
+      description="What this deployment can reach. Adding a plugin is catalog only; owner grants decide invocation."
     >
       <PageSection
         title="Connected"
@@ -55,7 +55,7 @@ export function AdminPluginsPage() {
                   to={`/admin/plugins/${plugin.id}`}
                   title={plugin.title}
                   description={`${plugin.vendor} · ${plugin.url}`}
-                  summary={pluginRowSummary(plugin.toolCount, plugin.botCount)}
+                  summary={pluginRowSummary(plugin.toolCount, plugin.grantedCount)}
                 />
               </div>
             ))}

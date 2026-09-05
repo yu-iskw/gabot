@@ -1,6 +1,9 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { createFirebaseAuth } from '../firebase.js';
+
+import { syncAuthQueryCache } from './auth-query-cache.js';
 
 import type { Auth, User } from 'firebase/auth';
 import type { ReactNode } from 'react';
@@ -16,15 +19,20 @@ const AuthContext = createContext<AuthValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const auth = useMemo(() => createFirebaseAuth(), []);
+  const queryClient = useQueryClient();
+  const uidRef = useRef<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     return auth.onAuthStateChanged((next) => {
+      const nextUid = next?.uid ?? null;
+      syncAuthQueryCache(queryClient, uidRef.current, nextUid);
+      uidRef.current = nextUid;
       setUser(next);
       setReady(true);
     });
-  }, [auth]);
+  }, [auth, queryClient]);
 
   const value = useMemo<AuthValue>(
     () => ({

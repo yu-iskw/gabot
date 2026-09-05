@@ -3,11 +3,15 @@ import { randomUUID } from 'node:crypto';
 import {
   assertDelegationBudget,
   asString,
+  capabilityGrantId,
   cloneAuthority,
   DEFAULT_ALLOW_POLICY,
   DEFAULT_CHANNEL_NAME,
   defaultChannelParticipants,
+  defaultOwnerConnections,
+  defaultOwnerGrants,
   nextRoutineRun,
+  ownerConnectionId,
   personalChannelId,
   personalProjectId,
   personalWorkspaceId,
@@ -22,6 +26,8 @@ import type {
   AgentProfile,
   AuditListScope,
   AuditRecord,
+  CapabilityGrantRecord,
+  CapabilityGrantWrite,
   ChannelEventRecord,
   ChannelParticipant,
   ChannelRecord,
@@ -29,8 +35,8 @@ import type {
   DelegatedChildInput,
   DelegationRecord,
   GabotStore,
-  GrantRecord,
   MessageRecord,
+  OwnerConnectionRecord,
   PluginRecord,
   PluginTool,
   RoutineListItem,
@@ -49,7 +55,6 @@ import type { ActionPolicy, AuthorityEnvelope, VerifiedPerson } from '@gabot/com
 
 type UserRow = SessionUser;
 type ThreadRow = { userId: string; channelId: string; threadId: string };
-type GrantRow = { kind: string; ref: string; agentId: string };
 type WorkRow = WorkRecord & {
   runAt: Date;
   claimedBy: string | null;
@@ -78,9 +83,8 @@ export class MemoryStore implements GabotStore {
   private readonly messages: MessageRecord[] = [];
   private readonly threads: ThreadRow[] = [];
   private readonly audits: AuditRecord[] = [];
-  private readonly grants: GrantRow[] = [
-    { kind: 'component', ref: 'component_note', agentId: 'general-assistant' },
-  ];
+  private readonly connections: OwnerConnectionRecord[] = [];
+  private readonly capabilityGrants: CapabilityGrantRecord[] = [];
   private readonly work: WorkRow[] = [];
   private readonly routines: RoutineRow[] = [];
   private readonly agents: AgentProfile[] = TEAM_BOT_PROFILES.map((bot) => ({ ...bot }));
@@ -210,14 +214,47 @@ export class MemoryStore implements GabotStore {
     return rows.slice(0, limit);
   }
 
-  public async hasGrant(agentId: string, kind: string, ref: string): Promise<boolean> {
-    return this.grants.some(
-      (row) => row.agentId === agentId && row.kind === kind && row.ref === ref,
-    );
+  public async listOwnerConnections(workspaceId: string): Promise<OwnerConnectionRecord[]> {
+    return this.connections
+      .filter((row) => row.workspaceId === workspaceId)
+      .map((row) => ({ ...row }));
   }
 
-  public async listGrants(): Promise<GrantRecord[]> {
-    return this.grants.map((row) => ({ kind: row.kind, ref: row.ref, agentId: row.agentId }));
+  public async listCapabilityGrants(workspaceId: string): Promise<CapabilityGrantRecord[]> {
+    const ids = new Set(
+      this.connections.filter((row) => row.workspaceId === workspaceId).map((row) => row.id),
+    );
+    return this.capabilityGrants
+      .filter((row) => ids.has(row.connectionId))
+      .map((row) => ({ ...row }));
+  }
+
+  public async setCapabilityGrant(input: CapabilityGrantWrite): Promise<void> {
+    const connectionId = ownerConnectionId(input.workspaceId, input.provider);
+    const connection = this.connections.find((row) => row.id === connectionId);
+    if (!connection || connection.ownerUserId !== input.ownerUserId) {
+      throw new Error('Connection not found.');
+    }
+    const id = capabilityGrantId(connectionId, input.capability, input.resource);
+    const index = this.capabilityGrants.findIndex(
+      (row) =>
+        row.connectionId === connectionId &&
+        row.capability === input.capability &&
+        row.resource === input.resource,
+    );
+    if (input.granted && index < 0) {
+      this.capabilityGrants.push({
+        id,
+        connectionId,
+        capability: input.capability,
+        resource: input.resource,
+        grantedBy: input.grantedBy,
+      });
+      return;
+    }
+    if (!input.granted && index >= 0) {
+      this.capabilityGrants.splice(index, 1);
+    }
   }
 
   public async listPluginTools(serverId: string): Promise<PluginTool[]> {
@@ -228,25 +265,6 @@ export class MemoryStore implements GabotStore {
       { name: 'echo', description: 'Echo text', ref: 'mock/echo' },
       { name: 'search', description: 'Harmless search stub', ref: 'mock/search' },
     ];
-  }
-
-  public async setGrant(input: {
-    agentId: string;
-    granted: boolean;
-    grantedBy: string;
-    kind: string;
-    ref: string;
-  }): Promise<void> {
-    const index = this.grants.findIndex(
-      (row) => row.agentId === input.agentId && row.kind === input.kind && row.ref === input.ref,
-    );
-    if (input.granted && index < 0) {
-      this.grants.push({ kind: input.kind, ref: input.ref, agentId: input.agentId });
-      return;
-    }
-    if (!input.granted && index >= 0) {
-      this.grants.splice(index, 1);
-    }
   }
 
   public async enqueueWork(input: {
@@ -294,7 +312,12 @@ export class MemoryStore implements GabotStore {
   }
 
   public async getUser(userId: string): Promise<SessionUser | null> {
-    return this.users.get(userId) ?? null;
+    const user = this.users.get(userId);
+    if (!user) {
+      return null;
+    }
+    this.ensurePersonalWorkspace(user);
+    return user;
   }
 
   public async listPeople(): Promise<SessionUser[]> {
@@ -761,7 +784,8 @@ export class MemoryStore implements GabotStore {
     const workspaceId = personalWorkspaceId(user.id);
     const projectId = personalProjectId(user.id);
     const channelId = personalChannelId(user.id);
-    if (!this.workspaces.has(workspaceId)) {
+    const createdWorkspace = !this.workspaces.has(workspaceId);
+    if (createdWorkspace) {
       this.workspaces.set(workspaceId, {
         id: workspaceId,
         organizationId: PLATFORM_ORG_ID,
@@ -780,6 +804,27 @@ export class MemoryStore implements GabotStore {
       });
     }
     this.attachChannelParties(channelId, user.id);
+    this.seedOwnerConnections(workspaceId, user.id, createdWorkspace);
+  }
+
+  private seedOwnerConnections(
+    workspaceId: string,
+    ownerUserId: string,
+    seedGrants: boolean,
+  ): void {
+    for (const connection of defaultOwnerConnections(workspaceId, ownerUserId)) {
+      if (!this.connections.some((row) => row.id === connection.id)) {
+        this.connections.push({ ...connection });
+      }
+    }
+    if (!seedGrants) {
+      return;
+    }
+    for (const grant of defaultOwnerGrants(workspaceId, ownerUserId)) {
+      if (!this.capabilityGrants.some((row) => row.id === grant.id)) {
+        this.capabilityGrants.push({ ...grant });
+      }
+    }
   }
 
   private attachChannelParties(channelId: string, userId: string, extraBotId?: string): void {

@@ -1,21 +1,11 @@
-export function grantSummary(held: number, total: number): string {
-  if (held === 0) {
-    return 'No Bots';
-  }
-  if (held === total) {
-    return total === 1 ? '1 Bot' : 'All Bots';
-  }
-  return `${String(held)} of ${String(total)} Bots`;
-}
-
-export function pluginRowSummary(toolCount: number, botCount: number): string {
+export function pluginRowSummary(toolCount: number, grantedCount: number): string {
   if (toolCount === 0) {
     return 'No tools yet';
   }
   const tools = toolCount === 1 ? '1 tool' : `${String(toolCount)} tools`;
-  if (botCount === 0) {
-    return `${tools} · no Bots`;
+  if (grantedCount === 0) {
+    return `${tools} · none granted`;
   }
-  const bots = botCount === 1 ? '1 Bot' : `${String(botCount)} Bots`;
-  return `${tools} · ${bots}`;
+  const grants = grantedCount === 1 ? '1 granted' : `${String(grantedCount)} granted`;
+  return `${tools} · ${grants}`;
 }

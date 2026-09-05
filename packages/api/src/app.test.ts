@@ -1,11 +1,19 @@
 import {
   asString,
+  CAPABILITY_GITHUB_ISSUES_CREATE,
+  CAPABILITY_MCP_ECHO,
   DEFAULT_ALLOW_POLICY,
+  GITHUB_ALLOWED_REPO,
+  GITHUB_CREATE_ISSUE,
   matchesToken,
   personalChannelId,
+  PROVIDER_GITHUB,
+  PROVIDER_MOCK_MCP,
+  RESOURCE_MCP_ECHO,
   rootAuthority,
+  TURN_TOOL_NAMES,
 } from '@gabot/common';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createApiApp } from './app.js';
 import { SCHEMA_SQL } from './db/schema-sql.js';
@@ -50,6 +58,27 @@ function appWith(store: MemoryStore, navigations: string[] = []) {
   });
 }
 
+async function ownerRun(store: MemoryStore) {
+  await store.upsertUser(person, ['admin@example.com']);
+  const workspace = await store.getWorkspaceForUser(person.id);
+  if (!workspace) {
+    throw new Error('workspace missing');
+  }
+  const run = await store.createRun({
+    workspaceId: workspace.id,
+    projectId: workspace.projectId,
+    channelId: defaultChannel,
+    botId: 'general-assistant',
+    ownerUserId: person.id,
+    triggerType: 'interactive',
+    status: 'running',
+    objective: 'test',
+    authority: rootAuthority(TURN_TOOL_NAMES),
+    depth: 0,
+  });
+  return { run, workspace };
+}
+
 describe('schema sql', () => {
   it('creates vector extension before mastra tables', () => {
     const extension = SCHEMA_SQL.indexOf('CREATE EXTENSION IF NOT EXISTS vector');
@@ -59,8 +88,15 @@ describe('schema sql', () => {
     expect(schema.users).toBeDefined();
     expect(schema.actionPolicy).toBeDefined();
     expect(schema.workspaces).toBeDefined();
+    expect(schema.connections).toBeDefined();
+    expect(schema.capabilityGrants).toBeDefined();
     expect(schema.organizationMembers).toBeDefined();
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS runs');
+    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS connections');
+    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS capability_grants');
+    expect(SCHEMA_SQL).toContain(
+      'INSERT INTO connections (id, workspace_id, owner_user_id, provider, credential_ref, status)',
+    );
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS organization_members');
     expect(SCHEMA_SQL).toContain("WHERE channel_id = 'general'");
     expect(SCHEMA_SQL).toContain('FROM channel_memberships');
@@ -238,6 +274,7 @@ describe('control plane', () => {
 
   it('renders a granted component and enqueues a handoff', async () => {
     const store = new MemoryStore();
+    const { run } = await ownerRun(store);
     const note = await runGatewayAction({
       store,
       sandbox: sandbox([]),
@@ -246,6 +283,7 @@ describe('control plane', () => {
       botId: 'general-assistant',
       toolName: 'component_note',
       args: { title: 'Hi', body: 'There' },
+      run,
     });
     expect(note.ok).toBe(true);
     const asked = await runGatewayAction({
@@ -292,7 +330,6 @@ describe('control plane', () => {
     expect(await store.listDueRoutines(new Date())).toHaveLength(1);
     await store.markRoutineRun('r1', new Date(Date.now() + 86_400_000));
     expect(await store.listDueRoutines(new Date())).toHaveLength(0);
-    expect(await store.hasGrant('general-assistant', 'component', 'component_note')).toBe(true);
     await store.enqueueWork({ kind: 'handoff', key: 'a', payload: {} });
     await store.enqueueWork({ kind: 'handoff', key: 'a', payload: {} });
   });
@@ -354,30 +391,35 @@ describe('control plane', () => {
     const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
     const listed = await app.request('/api/admin/plugins', { headers });
     const catalogue = (await listed.json()) as {
-      plugins: Array<{ botCount: number; id: string; toolCount: number }>;
+      plugins: Array<{ grantedCount: number; id: string; toolCount: number }>;
     };
-    expect(catalogue.plugins[0]).toMatchObject({ id: 'mock', toolCount: 2, botCount: 0 });
+    expect(catalogue.plugins[0]).toMatchObject({ id: 'mock', toolCount: 2, grantedCount: 0 });
     const granted = await app.request('/api/admin/plugins/mock/grants', {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ agentId: 'general-assistant', ref: 'mock/echo', granted: true }),
+      body: JSON.stringify({ ref: 'mock/echo', granted: true }),
     });
     expect(granted.status).toBe(200);
-    expect(await store.hasGrant('general-assistant', 'mcp', 'mock/echo')).toBe(true);
+    const workspace = await store.getWorkspaceForUser(person.id);
+    const afterGrant = workspace ? await store.listCapabilityGrants(workspace.id) : [];
+    expect(
+      afterGrant.some(
+        (grant) => grant.capability === CAPABILITY_MCP_ECHO && grant.resource === RESOURCE_MCP_ECHO,
+      ),
+    ).toBe(true);
     const detail = await app.request('/api/admin/plugins/mock', { headers });
     const body = (await detail.json()) as {
-      tools: Array<{ grantedTo: string[]; name: string }>;
+      tools: Array<{ granted: boolean; name: string }>;
     };
-    expect(body.tools.find((tool) => tool.name === 'echo')?.grantedTo).toEqual([
-      'general-assistant',
-    ]);
+    expect(body.tools.find((tool) => tool.name === 'echo')?.granted).toBe(true);
     const revoked = await app.request('/api/admin/plugins/mock/grants', {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ agentId: 'general-assistant', ref: 'mock/echo', granted: false }),
+      body: JSON.stringify({ ref: 'mock/echo', granted: false }),
     });
     expect(revoked.status).toBe(200);
-    expect(await store.hasGrant('general-assistant', 'mcp', 'mock/echo')).toBe(false);
+    const afterRevoke = workspace ? await store.listCapabilityGrants(workspace.id) : [];
+    expect(afterRevoke.some((grant) => grant.capability === CAPABILITY_MCP_ECHO)).toBe(false);
     expect((await app.request('/api/agents/general-assistant', { headers })).status).toBe(200);
     expect((await app.request('/api/agents/missing', { headers })).status).toBe(404);
   });
@@ -758,6 +800,234 @@ describe('control plane', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.output.toLowerCase()).toContain('depth');
+  });
+});
+
+describe('capability grants', () => {
+  it('refuses a non-owner participant from starting a run that spends owner grants', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser({ id: 'user-2', email: 'other@example.com', name: 'Other' }, []);
+    await store.addChannelParticipant({
+      channelId: defaultChannel,
+      principalId: 'user-2',
+      principalType: 'user',
+      role: 'member',
+    });
+    await expect(
+      executeTurn({
+        store,
+        sandbox: sandbox([]),
+        agent: createScriptedAgentRunner(),
+        mcpUrl: 'http://mcp.test',
+        user: { id: 'user-2', email: 'other@example.com', isAdmin: false, name: 'Other' },
+        channelId: defaultChannel,
+        message: 'create an issue on acme/allowed',
+      }),
+    ).rejects.toThrow(/workspace owner/);
+  });
+
+  it('refuses MCP echo until the workspace grant exists, then allows it', async () => {
+    const store = new MemoryStore();
+    const { run, workspace } = await ownerRun(store);
+    const denied = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: 'mcp__mock__echo',
+      args: { text: 'hello' },
+      run,
+    });
+    expect(denied.ok).toBe(false);
+    expect(denied.output.toLowerCase()).toContain('grant');
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: PROVIDER_MOCK_MCP,
+      capability: CAPABILITY_MCP_ECHO,
+      resource: RESOURCE_MCP_ECHO,
+      granted: true,
+      grantedBy: person.id,
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ result: { content: [{ text: 'hello' }] } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const allowed = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: 'mcp__mock__echo',
+      args: { text: 'hello' },
+      run,
+    });
+    vi.unstubAllGlobals();
+    expect(allowed.ok).toBe(true);
+  });
+
+  it('stubs GitHub issue create for the granted repo and denies another', async () => {
+    const store = new MemoryStore();
+    const { run } = await ownerRun(store);
+    const allowed = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: GITHUB_CREATE_ISSUE,
+      args: { repo: GITHUB_ALLOWED_REPO, title: 'Outage' },
+      run,
+    });
+    expect(allowed.ok).toBe(true);
+    expect(allowed.output).toContain(GITHUB_ALLOWED_REPO);
+    const denied = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: GITHUB_CREATE_ISSUE,
+      args: { repo: 'acme/other', title: 'Outage' },
+      run,
+    });
+    expect(denied.ok).toBe(false);
+    expect(denied.matched).toBe('grant');
+    const trail = await store.listAudit(10);
+    const denyRow = trail.find((row) => row.payload.resource === 'acme/other');
+    expect(denyRow?.payload).toMatchObject({
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: 'acme/other',
+      decision: 'deny',
+      ownerUserId: person.id,
+      botId: 'general-assistant',
+      runId: run.id,
+    });
+    const allowRow = trail.find((row) => row.payload.resource === GITHUB_ALLOWED_REPO);
+    expect(allowRow?.payload).toMatchObject({
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: GITHUB_ALLOWED_REPO,
+      decision: 'allow',
+      ownerUserId: person.id,
+      botId: 'general-assistant',
+      runId: run.id,
+    });
+    expect(typeof allowRow?.payload.connectionId).toBe('string');
+  });
+
+  it('does not revoke a slash repo when a hyphenated alias is written', async () => {
+    const store = new MemoryStore();
+    const { run, workspace } = await ownerRun(store);
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: PROVIDER_GITHUB,
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: 'octo/foo-bar',
+      granted: true,
+      grantedBy: person.id,
+    });
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: PROVIDER_GITHUB,
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: 'octo-foo/bar',
+      granted: true,
+      grantedBy: person.id,
+    });
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: PROVIDER_GITHUB,
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: 'acme-allowed',
+      granted: false,
+      grantedBy: person.id,
+    });
+    const grants = await store.listCapabilityGrants(workspace.id);
+    const githubResources = grants
+      .filter((grant) => grant.capability === CAPABILITY_GITHUB_ISSUES_CREATE)
+      .map((grant) => grant.resource)
+      .sort();
+    expect(githubResources).toEqual(['acme/allowed', 'octo-foo/bar', 'octo/foo-bar']);
+    const allowed = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: GITHUB_CREATE_ISSUE,
+      args: { repo: GITHUB_ALLOWED_REPO, title: 'Outage' },
+      run,
+    });
+    expect(allowed.ok).toBe(true);
+  });
+
+  it('does not restore a revoked default grant after upsertUser or getUser', async () => {
+    const store = new MemoryStore();
+    const { run, workspace } = await ownerRun(store);
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: PROVIDER_GITHUB,
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: GITHUB_ALLOWED_REPO,
+      granted: false,
+      grantedBy: person.id,
+    });
+    await store.upsertUser(person, ['admin@example.com']);
+    await store.getUser(person.id);
+    const denied = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: GITHUB_CREATE_ISSUE,
+      args: { repo: GITHUB_ALLOWED_REPO, title: 'Outage' },
+      run,
+    });
+    expect(denied.ok).toBe(false);
+    expect(denied.matched).toBe('grant');
+  });
+
+  it('seeds the GitHub grant when a workspace is created', async () => {
+    const store = new MemoryStore();
+    const other = { id: 'user-3', email: 'third@example.com', name: 'Third' };
+    await store.upsertUser(other, []);
+    const workspace = await store.getWorkspaceForUser(other.id);
+    if (!workspace) {
+      throw new Error('workspace missing');
+    }
+    const grants = await store.listCapabilityGrants(workspace.id);
+    expect(
+      grants.some(
+        (grant) =>
+          grant.capability === CAPABILITY_GITHUB_ISSUES_CREATE &&
+          grant.resource === GITHUB_ALLOWED_REPO,
+      ),
+    ).toBe(true);
+  });
+
+  it('lists owner connections', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const response = await app.request('/api/admin/connections', { headers });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      connections: Array<{ credentialRef: string; provider: string }>;
+    };
+    expect(body.connections.map((row) => row.provider).sort()).toEqual([
+      'gabot',
+      'github',
+      'mock-mcp',
+    ]);
+    expect(body.connections.every((row) => row.credentialRef.length > 0)).toBe(true);
   });
 });
 

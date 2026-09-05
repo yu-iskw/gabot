@@ -7,6 +7,7 @@ export const CREATE_BOT = 'create_bot';
 export const CREATE_ROUTINE = 'create_routine';
 export const UPDATE_ROUTINE = 'update_routine';
 export const DELEGATE_TO_BOT = 'delegate_to_bot';
+export const GITHUB_CREATE_ISSUE = 'github_create_issue';
 
 export const COMPUTER_TOOLS = [
   {
@@ -121,6 +122,20 @@ export const DELEGATE_TO_BOT_TOOL = {
   },
 } as const;
 
+export const GITHUB_CREATE_ISSUE_TOOL = {
+  name: GITHUB_CREATE_ISSUE,
+  description: 'Create a GitHub issue using the owner connection. The bot never holds the token.',
+  parameters: {
+    type: 'object',
+    properties: {
+      repo: { type: 'string', description: 'owner/name repository' },
+      title: { type: 'string' },
+      body: { type: 'string' },
+    },
+    required: ['repo', 'title'],
+  },
+} as const;
+
 export const TURN_TOOLS = [
   ...COMPUTER_TOOLS,
   MCP_ECHO_TOOL,
@@ -129,6 +144,7 @@ export const TURN_TOOLS = [
   CREATE_ROUTINE_TOOL,
   UPDATE_ROUTINE_TOOL,
   DELEGATE_TO_BOT_TOOL,
+  GITHUB_CREATE_ISSUE_TOOL,
 ] as const;
 
 export const TURN_TOOL_NAMES = TURN_TOOLS.map((tool) => tool.name);

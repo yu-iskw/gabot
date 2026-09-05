@@ -11,6 +11,12 @@ import {
 } from '@gabot/common';
 import postgres from 'postgres';
 
+import {
+  insertDefaultOwnerConnections,
+  selectCapabilityGrants,
+  selectOwnerConnections,
+  upsertCapabilityGrant,
+} from './postgres-connections.js';
 import { insertDelegatedChild } from './postgres-delegation.js';
 import { parseEnvelope, toRunRecord, type DbRun } from './postgres-run-map.js';
 import { PROTECTED_AGENT_ID } from './types.js';
@@ -20,6 +26,8 @@ import type {
   AgentProfile,
   AuditListScope,
   AuditRecord,
+  CapabilityGrantRecord,
+  CapabilityGrantWrite,
   ChannelEventRecord,
   ChannelParticipant,
   ChannelRecord,
@@ -27,8 +35,8 @@ import type {
   DelegatedChildInput,
   DelegationRecord,
   GabotStore,
-  GrantRecord,
   MessageRecord,
+  OwnerConnectionRecord,
   PluginRecord,
   PluginTool,
   RoutineListItem,
@@ -217,18 +225,16 @@ export class PostgresStore implements GabotStore {
     `;
   }
 
-  public async hasGrant(agentId: string, kind: string, ref: string): Promise<boolean> {
-    const rows = await this.sql<{ n: string }[]>`
-      SELECT 1 AS n FROM plugin_grants
-      WHERE agent_id = ${agentId} AND kind = ${kind} AND ref = ${ref}
-    `;
-    return rows.length > 0;
+  public async listOwnerConnections(workspaceId: string): Promise<OwnerConnectionRecord[]> {
+    return selectOwnerConnections(this.sql, workspaceId);
   }
 
-  public async listGrants(): Promise<GrantRecord[]> {
-    return this.sql<GrantRecord[]>`
-      SELECT kind, ref, agent_id AS "agentId" FROM plugin_grants
-    `;
+  public async listCapabilityGrants(workspaceId: string): Promise<CapabilityGrantRecord[]> {
+    return selectCapabilityGrants(this.sql, workspaceId);
+  }
+
+  public async setCapabilityGrant(input: CapabilityGrantWrite): Promise<void> {
+    await upsertCapabilityGrant(this.sql, input);
   }
 
   public async listPluginTools(serverId: string): Promise<PluginTool[]> {
@@ -240,27 +246,6 @@ export class PostgresStore implements GabotStore {
       description: row.description,
       ref: `${serverId}/${row.name}`,
     }));
-  }
-
-  public async setGrant(input: {
-    agentId: string;
-    granted: boolean;
-    grantedBy: string;
-    kind: string;
-    ref: string;
-  }): Promise<void> {
-    if (input.granted) {
-      await this.sql`
-        INSERT INTO plugin_grants (kind, ref, agent_id, granted_by)
-        VALUES (${input.kind}, ${input.ref}, ${input.agentId}, ${input.grantedBy})
-        ON CONFLICT DO NOTHING
-      `;
-      return;
-    }
-    await this.sql`
-      DELETE FROM plugin_grants
-      WHERE kind = ${input.kind} AND ref = ${input.ref} AND agent_id = ${input.agentId}
-    `;
   }
 
   public async enqueueWork(input: {
@@ -333,12 +318,14 @@ export class PostgresStore implements GabotStore {
     const roles = await this.sql<{ role: string }[]>`
       SELECT role FROM user_roles WHERE user_id = ${userId} AND role = 'admin'
     `;
-    return {
+    const session = {
       id: user.id,
       email: user.email,
       name: user.name ?? user.email,
       isAdmin: roles.length > 0,
     };
+    await this.ensurePersonalWorkspace(session);
+    return session;
   }
 
   public async listPeople(): Promise<SessionUser[]> {
@@ -907,10 +894,11 @@ export class PostgresStore implements GabotStore {
         VALUES (${PLATFORM_ORG_ID}, ${user.id}, ${orgRole})
         ON CONFLICT DO NOTHING
       `;
-      await sql`
+      const created = await sql<{ id: string }[]>`
         INSERT INTO workspaces (id, organization_id, owner_user_id, name)
         VALUES (${workspaceId}, ${PLATFORM_ORG_ID}, ${user.id}, ${`${user.name}'s workspace`})
         ON CONFLICT (id) DO NOTHING
+        RETURNING id
       `;
       await sql`
         INSERT INTO projects (id, workspace_id, name)
@@ -925,6 +913,7 @@ export class PostgresStore implements GabotStore {
       await Promise.all([
         this.retireSharedGeneral(sql, user.id),
         this.attachChannelParties(sql, channelId, user.id),
+        insertDefaultOwnerConnections(sql, workspaceId, user.id, created.length > 0),
       ]);
     });
   }

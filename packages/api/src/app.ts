@@ -4,6 +4,8 @@ import {
   COMPUTER_NAVIGATE,
   COMPUTER_SCREENSHOT,
   matchesToken,
+  mcpCapabilityForRef,
+  PROVIDER_MOCK_MCP,
 } from '@gabot/common';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -11,7 +13,12 @@ import { cors } from 'hono/cors';
 import { requireUser } from './auth.js';
 import { runGatewayAction } from './gateway.js';
 import { getPluginDetail, listPluginViews } from './plugin-views.js';
-import { PROTECTED_AGENT_ID, type GabotStore, type SessionUser } from './store/types.js';
+import {
+  PROTECTED_AGENT_ID,
+  type GabotStore,
+  type SessionUser,
+  type WorkspaceRecord,
+} from './store/types.js';
 import { executeRun, executeTurn, isTurnClientError } from './turns.js';
 
 import type { AuthVariables } from './auth.js';
@@ -294,11 +301,35 @@ function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options:
 const SKILL_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
 
 function registerPluginRoutes(app: Hono<{ Variables: AuthVariables }>, options: ApiOptions): void {
+  app.get('/api/admin/connections', async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
+    const connections = await options.store.listOwnerConnections(access.workspace.id);
+    return context.json({ connections });
+  });
+  app.put('/api/admin/capability-grants', async (context) => {
+    const outcome = await writeCapabilityGrant(
+      options.store,
+      context.get('user'),
+      asRecord(await context.req.json()),
+    );
+    return context.json(outcome.body, outcome.status);
+  });
   app.get('/api/admin/plugins', async (context) => {
-    return context.json({ plugins: await listPluginViews(options.store) });
+    const workspace = await options.store.getWorkspaceForUser(context.get('user').id);
+    if (!workspace) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    return context.json({ plugins: await listPluginViews(options.store, workspace) });
   });
   app.get('/api/admin/plugins/:id', async (context) => {
-    const detail = await getPluginDetail(options.store, context.req.param('id'));
+    const workspace = await options.store.getWorkspaceForUser(context.get('user').id);
+    if (!workspace) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    const detail = await getPluginDetail(options.store, context.req.param('id'), workspace);
     if (!detail) {
       return context.json({ error: NOT_FOUND }, 404);
     }
@@ -315,42 +346,125 @@ function registerPluginRoutes(app: Hono<{ Variables: AuthVariables }>, options: 
   });
 }
 
+async function writeCapabilityGrant(
+  store: GabotStore,
+  user: SessionUser,
+  body: Record<string, unknown>,
+): Promise<{ body: Record<string, unknown>; status: 200 | 400 | 403 | 404 }> {
+  const access = await requireAdminWorkspace(store, user);
+  if (!access.ok) {
+    return access;
+  }
+  const provider = asString(body.provider);
+  const capability = asString(body.capability);
+  const resource = asString(body.resource);
+  if (!provider || !capability || !resource) {
+    return { status: 400, body: { error: 'Invalid grant' } };
+  }
+  const granted = body.granted !== false;
+  return persistCapabilityGrant(store, user, access.workspace, {
+    provider,
+    capability,
+    resource,
+    granted,
+    eventType: granted ? 'capability.granted' : 'capability.revoked',
+    targetId: resource,
+  });
+}
+
 async function writePluginGrant(
   store: GabotStore,
   user: SessionUser,
   pluginId: string,
   body: Record<string, unknown>,
 ): Promise<{ body: Record<string, unknown>; status: 200 | 400 | 403 | 404 }> {
-  if (!user.isAdmin) {
-    return { status: 403, body: { error: 'Forbidden' } };
+  const access = await requireAdminWorkspace(store, user);
+  if (!access.ok) {
+    return access;
   }
-  const detail = await getPluginDetail(store, pluginId);
+  const detail = await getPluginDetail(store, pluginId, access.workspace);
   if (!detail) {
     return { status: 404, body: { error: NOT_FOUND } };
   }
-  const agentId = asString(body.agentId);
   const ref = asString(body.ref);
   const granted = body.granted !== false;
-  const knownAgent = detail.agents.some((agent) => agent.id === agentId);
-  const knownTool = detail.tools.some((tool) => tool.ref === ref);
-  if (!knownAgent || !knownTool) {
+  if (!detail.tools.some((tool) => tool.ref === ref)) {
     return { status: 400, body: { error: 'Invalid grant' } };
   }
-  await store.setGrant({
-    kind: 'mcp',
-    ref,
-    agentId,
+  return persistCapabilityGrant(store, user, access.workspace, {
+    provider: PROVIDER_MOCK_MCP,
+    capability: mcpCapabilityForRef(ref),
+    resource: ref,
     granted,
-    grantedBy: user.id,
+    eventType: granted ? 'plugin.granted' : 'plugin.revoked',
+    targetId: ref,
+    extraPayload: { ref },
   });
+}
+
+async function requireAdminWorkspace(
+  store: GabotStore,
+  user: SessionUser,
+): Promise<
+  | { ok: true; workspace: WorkspaceRecord }
+  | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
+> {
+  if (!user.isAdmin) {
+    return { ok: false, status: 403, body: { error: 'Forbidden' } };
+  }
+  const workspace = await store.getWorkspaceForUser(user.id);
+  if (!workspace) {
+    return { ok: false, status: 404, body: { error: NOT_FOUND } };
+  }
+  return { ok: true, workspace };
+}
+
+async function persistCapabilityGrant(
+  store: GabotStore,
+  user: SessionUser,
+  workspace: WorkspaceRecord,
+  input: {
+    capability: string;
+    eventType: string;
+    extraPayload?: Record<string, unknown>;
+    granted: boolean;
+    provider: string;
+    resource: string;
+    targetId: string;
+  },
+): Promise<{ body: Record<string, unknown>; status: 200 | 404 }> {
+  try {
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: input.provider,
+      capability: input.capability,
+      resource: input.resource,
+      granted: input.granted,
+      grantedBy: user.id,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Connection not found.') {
+      return { status: 404, body: { error: NOT_FOUND } };
+    }
+    throw error;
+  }
   await store.insertAudit({
     actorUserId: user.id,
-    eventType: granted ? 'plugin.granted' : 'plugin.revoked',
+    eventType: input.eventType,
     targetType: 'grant',
-    targetId: ref,
-    payload: { agentId, ref, granted },
+    targetId: input.targetId,
+    payload: {
+      ...input.extraPayload,
+      provider: input.provider,
+      capability: input.capability,
+      resource: input.resource,
+      granted: input.granted,
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+    },
   });
-  return { status: 200, body: { ok: true, granted } };
+  return { status: 200, body: { ok: true, granted: input.granted } };
 }
 
 function registerComputerRoutes(

@@ -10,12 +10,15 @@ import {
 } from '../components/layout/page-shell.js';
 import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
-import { grantSummary } from '../lib/grant-summary.js';
 
 type PluginDetail = {
-  agents: Array<{ id: string; title: string }>;
   plugin: { id: string; title: string; url: string; vendor: string };
-  tools: Array<{ description: string; grantedTo: string[]; name: string; ref: string }>;
+  tools: Array<{
+    description: string;
+    granted: boolean;
+    name: string;
+    ref: string;
+  }>;
 };
 
 export function AdminPluginPage({ pluginId }: { pluginId: string }) {
@@ -27,7 +30,6 @@ export function AdminPluginPage({ pluginId }: { pluginId: string }) {
 
   const plugin = detail.data?.plugin;
   const tools = detail.data?.tools ?? [];
-  const botTotal = detail.data?.agents.length ?? 0;
 
   return (
     <PageShell
@@ -35,13 +37,13 @@ export function AdminPluginPage({ pluginId }: { pluginId: string }) {
       title={plugin?.title ?? 'Plugin'}
       description={
         plugin
-          ? `${plugin.vendor} at ${plugin.url}. A Bot is told about a tool only when it holds it.`
+          ? `${plugin.vendor} at ${plugin.url}. Tools are catalogued here; grants live on the owner connection.`
           : 'Loading this connector…'
       }
     >
       <PageSection
         title="Tools"
-        description="How widely each tool is granted. Open a tool to switch it on or off for a Bot."
+        description="Open a tool to grant or revoke it for this workspace."
       >
         {detail.isPending ? null : tools.length === 0 ? (
           <PageEmpty>No tools listed for this connector.</PageEmpty>
@@ -54,7 +56,7 @@ export function AdminPluginPage({ pluginId }: { pluginId: string }) {
                   to={`/admin/plugins/${pluginId}/tools/${tool.name}`}
                   title={tool.name}
                   description={tool.description}
-                  summary={grantSummary(tool.grantedTo.length, botTotal)}
+                  summary={tool.granted ? 'Granted' : 'Not granted'}
                 />
               </div>
             ))}
