@@ -131,6 +131,26 @@ export const projects = pgTable('projects', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const connections = pgTable('connections', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull(),
+  ownerUserId: text('owner_user_id').notNull(),
+  provider: text('provider').notNull(),
+  credentialRef: text('credential_ref').notNull(),
+  status: text('status').notNull(),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const capabilityGrants = pgTable('capability_grants', {
+  id: text('id').primaryKey(),
+  connectionId: text('connection_id').notNull(),
+  capability: text('capability').notNull(),
+  resource: text('resource').notNull(),
+  grantedBy: text('granted_by'),
+  createdAt: createdAt(),
+});
+
 export const channelParticipants = pgTable(
   'channel_participants',
   {

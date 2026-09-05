@@ -95,10 +95,31 @@ export type PluginTool = {
   ref: string;
 };
 
-export type GrantRecord = {
-  agentId: string;
-  kind: string;
-  ref: string;
+export type OwnerConnectionRecord = {
+  credentialRef: string;
+  id: string;
+  ownerUserId: string;
+  provider: string;
+  status: 'active' | 'revoked';
+  workspaceId: string;
+};
+
+export type CapabilityGrantRecord = {
+  capability: string;
+  connectionId: string;
+  grantedBy: string;
+  id: string;
+  resource: string;
+};
+
+export type CapabilityGrantWrite = {
+  capability: string;
+  granted: boolean;
+  grantedBy: string;
+  ownerUserId: string;
+  provider: string;
+  resource: string;
+  workspaceId: string;
 };
 
 export type RoutineListItem = RoutineRecord & {
@@ -217,16 +238,10 @@ export type GabotStore = {
     payload: Record<string, unknown>;
   }): Promise<void>;
   listAudit(limit: number, scope?: AuditListScope): Promise<AuditRecord[]>;
-  hasGrant(agentId: string, kind: string, ref: string): Promise<boolean>;
-  listGrants(): Promise<GrantRecord[]>;
+  listOwnerConnections(workspaceId: string): Promise<OwnerConnectionRecord[]>;
+  listCapabilityGrants(workspaceId: string): Promise<CapabilityGrantRecord[]>;
+  setCapabilityGrant(input: CapabilityGrantWrite): Promise<void>;
   listPluginTools(serverId: string): Promise<PluginTool[]>;
-  setGrant(input: {
-    agentId: string;
-    granted: boolean;
-    grantedBy: string;
-    kind: string;
-    ref: string;
-  }): Promise<void>;
   enqueueWork(input: {
     kind: string;
     key: string;

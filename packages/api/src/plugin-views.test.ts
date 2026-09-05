@@ -3,33 +3,42 @@ import { describe, expect, it } from 'vitest';
 import { getPluginDetail, listPluginViews } from './plugin-views.js';
 import { MemoryStore } from './store/memory-store.js';
 
+const person = { id: 'user-1', email: 'admin@example.com', name: 'Admin' };
+
 describe('plugin views', () => {
-  it('counts tools and granted bots on the catalogue', async () => {
+  it('counts tools and workspace grants on the catalogue', async () => {
     const store = new MemoryStore();
-    const listed = await listPluginViews(store);
+    await store.upsertUser(person, ['admin@example.com']);
+    const workspace = await store.getWorkspaceForUser(person.id);
+    const listed = await listPluginViews(store, workspace?.id ?? '');
     expect(listed).toEqual([
       expect.objectContaining({
         id: 'mock',
         title: 'Mock MCP',
         toolCount: 2,
-        botCount: 0,
+        grantedCount: 0,
       }),
     ]);
   });
 
-  it('lists which bots hold each tool', async () => {
+  it('shows whether the workspace holds each tool', async () => {
     const store = new MemoryStore();
-    await store.setGrant({
-      kind: 'mcp',
-      ref: 'mock/echo',
-      agentId: 'general-assistant',
+    await store.upsertUser(person, ['admin@example.com']);
+    const workspace = await store.getWorkspaceForUser(person.id);
+    if (!workspace) {
+      throw new Error('workspace missing');
+    }
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: 'mock-mcp',
+      capability: 'mcp:mock/echo',
+      resource: 'mock/echo',
       granted: true,
       grantedBy: 'admin',
     });
-    const detail = await getPluginDetail(store, 'mock');
-    expect(detail?.tools.find((tool) => tool.name === 'echo')?.grantedTo).toEqual([
-      'general-assistant',
-    ]);
-    expect(await getPluginDetail(store, 'missing')).toBeNull();
+    const detail = await getPluginDetail(store, 'mock', workspace.id);
+    expect(detail?.tools.find((tool) => tool.name === 'echo')?.granted).toBe(true);
+    expect(await getPluginDetail(store, 'missing', workspace.id)).toBeNull();
   });
 });

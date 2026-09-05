@@ -12,3 +12,5 @@ Numbered records for gabot. Start at [0001](0001-record-architecture-decisions.m
 - [0008. Channel is the durable collaboration context](0008-channel-durable-collaboration-context.md)
 - [0009. Every autonomous effectful execution has a durable Run](0009-durable-run.md)
 - [0010. Delegation can only attenuate authority](0010-delegation-attenuates-authority.md)
+- [0011. Bots hold no downstream credentials](0011-bots-hold-no-downstream-credentials.md)
+- [0012. Catalog, connect, grant, and invoke are separate](0012-catalog-connect-grant-invoke.md)

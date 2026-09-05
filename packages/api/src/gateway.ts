@@ -3,6 +3,9 @@ import {
   asString,
   asStringArray,
   attenuateAuthority,
+  CAPABILITY_COMPONENT_NOTE,
+  CAPABILITY_GITHUB_ISSUES_CREATE,
+  CAPABILITY_MCP_ECHO,
   COMPONENT_NOTE,
   COMPUTER_NAVIGATE,
   COMPUTER_SCREENSHOT,
@@ -10,9 +13,13 @@ import {
   CREATE_ROUTINE,
   DELEGATE_TO_BOT,
   evaluateActionPolicy,
+  GITHUB_CREATE_ISSUE,
+  matchCapabilityGrant,
   MCP_ECHO,
   nextRoutineRun,
   pageHost,
+  RESOURCE_COMPONENT_NOTE,
+  RESOURCE_MCP_ECHO,
   runMayInvoke,
   UPDATE_ROUTINE,
 } from '@gabot/common';
@@ -108,6 +115,9 @@ async function executeAllowed(
     case DELEGATE_TO_BOT: {
       return runDelegate(input, matched, reason);
     }
+    case GITHUB_CREATE_ISSUE: {
+      return runGithubCreateIssue(input, matched, reason);
+    }
     default: {
       const message = `Unknown tool ${input.toolName}`;
       return { ok: false, reason: message, matched, output: message };
@@ -150,11 +160,9 @@ async function runMcp(
   matched: string | null,
   reason: string,
 ): Promise<GatewayResult> {
-  const granted = await input.store.hasGrant(input.botId, 'mcp', 'mock/echo');
-  if (!granted) {
-    const message = 'MCP tool echo on mock is not granted.';
-    await writeAudit(input, 'mcp.refused', { tool: 'echo', server: 'mock', reason: message });
-    return { ok: false, reason: message, matched: 'grant', output: message };
+  const authorized = await authorizeCapability(input, CAPABILITY_MCP_ECHO, RESOURCE_MCP_ECHO);
+  if (!authorized.ok) {
+    return authorized.result;
   }
   const text = asString(input.args.text) || 'hello';
   const response = await fetch(`${input.mcpUrl.replace(/\/$/, '')}/mcp`, {
@@ -169,7 +177,12 @@ async function runMcp(
   });
   const body = (await response.json()) as { result?: { content?: Array<{ text?: string }> } };
   const output = body.result?.content?.[0]?.text ?? text;
-  await writeAudit(input, 'mcp.called', { tool: 'echo', output });
+  await writeAudit(input, 'mcp.called', {
+    tool: 'echo',
+    output,
+    ...authorized.audit,
+    decision: 'allow',
+  });
   return { ok: true, reason, matched, output };
 }
 
@@ -178,16 +191,99 @@ async function runComponent(
   matched: string | null,
   reason: string,
 ): Promise<GatewayResult> {
-  const granted = await input.store.hasGrant(input.botId, 'component', COMPONENT_NOTE);
-  if (!granted) {
-    const message = 'Component component_note is not granted.';
-    await writeAudit(input, 'component.refused', { tool: COMPONENT_NOTE });
-    return { ok: false, reason: message, matched: 'grant', output: message };
+  const authorized = await authorizeCapability(
+    input,
+    CAPABILITY_COMPONENT_NOTE,
+    RESOURCE_COMPONENT_NOTE,
+  );
+  if (!authorized.ok) {
+    return authorized.result;
   }
   const title = asString(input.args.title) || 'Note';
   const body = asString(input.args.body) || '';
-  await writeAudit(input, 'component.rendered', { title });
+  await writeAudit(input, 'component.rendered', {
+    title,
+    ...authorized.audit,
+    decision: 'allow',
+  });
   return { ok: true, reason, matched, output: `Note: ${title} ${body}`.trim() };
+}
+
+async function runGithubCreateIssue(
+  input: GatewayInput,
+  matched: string | null,
+  reason: string,
+): Promise<GatewayResult> {
+  const repo = asString(input.args.repo);
+  const title = asString(input.args.title);
+  if (!repo || !title) {
+    const message = 'repo and title are required';
+    return { ok: false, reason: message, matched, output: message };
+  }
+  const authorized = await authorizeCapability(input, CAPABILITY_GITHUB_ISSUES_CREATE, repo);
+  if (!authorized.ok) {
+    return authorized.result;
+  }
+  const output = `Created issue on ${repo}: ${title}`;
+  await writeAudit(input, 'github.issue.stubbed', {
+    repo,
+    title,
+    ...authorized.audit,
+    decision: 'allow',
+  });
+  return { ok: true, reason, matched, output };
+}
+
+async function authorizeCapability(
+  input: GatewayInput,
+  capability: string,
+  resource: string,
+): Promise<
+  | { audit: { capability: string; connectionId: string; resource: string }; ok: true }
+  | { ok: false; result: GatewayResult }
+> {
+  if (!input.run) {
+    const message = 'Grant-gated tools require a Run.';
+    await writeAudit(input, TOOL_DENIED, {
+      capability,
+      resource,
+      decision: 'deny',
+      reason: message,
+    });
+    return { ok: false, result: { ok: false, reason: message, matched: 'grant', output: message } };
+  }
+  const [connections, grants] = await Promise.all([
+    input.store.listOwnerConnections(input.run.workspaceId),
+    input.store.listCapabilityGrants(input.run.workspaceId),
+  ]);
+  const match = matchCapabilityGrant({
+    workspaceId: input.run.workspaceId,
+    ownerUserId: input.run.ownerUserId,
+    capability,
+    resource,
+    connections,
+    grants,
+  });
+  if (!match.ok) {
+    await writeAudit(input, TOOL_DENIED, {
+      capability,
+      resource,
+      decision: 'deny',
+      reason: match.reason,
+    });
+    return {
+      ok: false,
+      result: { ok: false, reason: match.reason, matched: 'grant', output: match.reason },
+    };
+  }
+  return {
+    ok: true,
+    audit: {
+      connectionId: match.connection.id,
+      capability,
+      resource,
+    },
+  };
 }
 
 async function runHandoff(

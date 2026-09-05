@@ -186,9 +186,9 @@ test('grants MCP echo from Plugins so a bot can call it', async ({ page, request
     await signIn(page);
     await page.goto('/admin/plugins/mock/tools/echo');
     await expect(page.locator('main h1')).toHaveText('echo');
-    await page.getByRole('switch', { name: 'Let General Assistant call echo' }).click();
+    await page.getByRole('switch', { name: 'Grant echo for this workspace' }).click();
     await expect(
-      page.getByRole('switch', { name: 'Let General Assistant call echo' }),
+      page.getByRole('switch', { name: 'Grant echo for this workspace' }),
     ).toHaveAttribute('aria-checked', 'true');
     await page.getByTestId('channel-general').click();
     await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
@@ -201,7 +201,7 @@ test('grants MCP echo from Plugins so a bot can call it', async ({ page, request
   } finally {
     await request.put(`${API}/api/admin/plugins/mock/grants`, {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      data: { agentId: 'general-assistant', ref: 'mock/echo', granted: false },
+      data: { ref: 'mock/echo', granted: false },
     });
   }
 });

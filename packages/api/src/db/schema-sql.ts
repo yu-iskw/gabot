@@ -267,6 +267,28 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS connections (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  credential_ref TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (workspace_id, provider)
+);
+
+CREATE TABLE IF NOT EXISTS capability_grants (
+  id TEXT PRIMARY KEY,
+  connection_id TEXT NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+  capability TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  granted_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (connection_id, capability, resource)
+);
+
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS project_id TEXT;
 
 CREATE TABLE IF NOT EXISTS channel_participants (
@@ -448,10 +470,6 @@ ON CONFLICT DO NOTHING;
 INSERT INTO components (name, title, kind, draft_description, published_description, published)
 VALUES ('component_note', 'Note', 'card', 'A note card', 'A granted note component', true)
 ON CONFLICT (name) DO NOTHING;
-
-INSERT INTO plugin_grants (kind, ref, agent_id, granted_by)
-VALUES ('component', 'component_note', 'general-assistant', 'seed')
-ON CONFLICT DO NOTHING;
 
 INSERT INTO skills (id, slug, title, summary, instructions, origin)
 VALUES ('brief', 'brief', 'Brief', 'Summarize in three bullets', 'Summarize the request in three bullets.', 'catalogue')

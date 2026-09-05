@@ -41,6 +41,8 @@ export {
   CREATE_ROUTINE_TOOL,
   DELEGATE_TO_BOT,
   DELEGATE_TO_BOT_TOOL,
+  GITHUB_CREATE_ISSUE,
+  GITHUB_CREATE_ISSUE_TOOL,
   MCP_ECHO,
   MCP_ECHO_TOOL,
   TURN_TOOL_NAMES,
@@ -48,6 +50,30 @@ export {
   UPDATE_ROUTINE,
   UPDATE_ROUTINE_TOOL,
 } from './tool-catalog.js';
+export {
+  CAPABILITY_COMPONENT_NOTE,
+  CAPABILITY_GITHUB_ISSUES_CREATE,
+  CAPABILITY_MCP_ECHO,
+  capabilityGrantId,
+  defaultOwnerConnections,
+  defaultOwnerGrants,
+  GITHUB_ALLOWED_REPO,
+  matchCapabilityGrant,
+  mcpCapabilityForRef,
+  ownerConnectionId,
+  PROVIDER_GABOT,
+  PROVIDER_GITHUB,
+  PROVIDER_MOCK_MCP,
+  RESOURCE_COMPONENT_NOTE,
+  RESOURCE_MCP_ECHO,
+} from './capability-grant.js';
+export type {
+  CapabilityGrant,
+  ConnectionStatus,
+  GrantMatch,
+  GrantMatchInput,
+  OwnerConnection,
+} from './capability-grant.js';
 export {
   assertDelegationBudget,
   attenuateAuthority,
