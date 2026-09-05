@@ -318,12 +318,14 @@ export class PostgresStore implements GabotStore {
     const roles = await this.sql<{ role: string }[]>`
       SELECT role FROM user_roles WHERE user_id = ${userId} AND role = 'admin'
     `;
-    return {
+    const session = {
       id: user.id,
       email: user.email,
       name: user.name ?? user.email,
       isAdmin: roles.length > 0,
     };
+    await this.ensurePersonalWorkspace(session);
+    return session;
   }
 
   public async listPeople(): Promise<SessionUser[]> {

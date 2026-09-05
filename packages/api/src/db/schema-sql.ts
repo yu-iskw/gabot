@@ -388,6 +388,27 @@ CROSS JOIN (
 ) AS b(id)
 ON CONFLICT DO NOTHING;
 
+INSERT INTO connections (id, workspace_id, owner_user_id, provider, credential_ref, status)
+SELECT 'conn-' || id || '-gabot', id, owner_user_id, 'gabot', 'local', 'active' FROM workspaces
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO connections (id, workspace_id, owner_user_id, provider, credential_ref, status)
+SELECT 'conn-' || id || '-mock-mcp', id, owner_user_id, 'mock-mcp', 'mcp-mock', 'active' FROM workspaces
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO connections (id, workspace_id, owner_user_id, provider, credential_ref, status)
+SELECT 'conn-' || id || '-github', id, owner_user_id, 'github', 'github-stub', 'active' FROM workspaces
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO capability_grants (id, connection_id, capability, resource, granted_by)
+SELECT 'cg-' || id || '-component-note', 'conn-' || id || '-gabot',
+       'component:component_note', 'component_note', owner_user_id
+FROM workspaces
+ON CONFLICT (connection_id, capability, resource) DO NOTHING;
+INSERT INTO capability_grants (id, connection_id, capability, resource, granted_by)
+SELECT 'cg-' || id || '-github-acme-allowed', 'conn-' || id || '-github',
+       'github.issues.create', 'acme/allowed', owner_user_id
+FROM workspaces
+ON CONFLICT (connection_id, capability, resource) DO NOTHING;
+
 UPDATE routines
 SET channel_id = 'ch-' || owner_user_id || '-general'
 WHERE channel_id = 'general';

@@ -45,7 +45,7 @@ export async function insertDefaultOwnerConnections(
         granted_by: grant.grantedBy,
       })),
     )}
-    ON CONFLICT (id) DO NOTHING
+    ON CONFLICT (connection_id, capability, resource) DO NOTHING
   `;
 }
 
@@ -106,10 +106,15 @@ export async function upsertCapabilityGrant(sql: Sql, input: CapabilityGrantWrit
       await tx`
         INSERT INTO capability_grants (id, connection_id, capability, resource, granted_by)
         VALUES (${id}, ${connectionId}, ${input.capability}, ${input.resource}, ${input.grantedBy})
-        ON CONFLICT (id) DO NOTHING
+        ON CONFLICT (connection_id, capability, resource) DO NOTHING
       `;
       return;
     }
-    await tx`DELETE FROM capability_grants WHERE id = ${id}`;
+    await tx`
+      DELETE FROM capability_grants
+      WHERE connection_id = ${connectionId}
+        AND capability = ${input.capability}
+        AND resource = ${input.resource}
+    `;
   });
 }

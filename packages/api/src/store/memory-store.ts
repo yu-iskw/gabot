@@ -236,7 +236,12 @@ export class MemoryStore implements GabotStore {
       throw new Error('Connection not found.');
     }
     const id = capabilityGrantId(connectionId, input.capability, input.resource);
-    const index = this.capabilityGrants.findIndex((row) => row.id === id);
+    const index = this.capabilityGrants.findIndex(
+      (row) =>
+        row.connectionId === connectionId &&
+        row.capability === input.capability &&
+        row.resource === input.resource,
+    );
     if (input.granted && index < 0) {
       this.capabilityGrants.push({
         id,
@@ -307,7 +312,12 @@ export class MemoryStore implements GabotStore {
   }
 
   public async getUser(userId: string): Promise<SessionUser | null> {
-    return this.users.get(userId) ?? null;
+    const user = this.users.get(userId);
+    if (!user) {
+      return null;
+    }
+    this.ensurePersonalWorkspace(user);
+    return user;
   }
 
   public async listPeople(): Promise<SessionUser[]> {

@@ -56,7 +56,11 @@ export function capabilityGrantId(
   capability: string,
   resource: string,
 ): string {
-  return `cg-${connectionId}-${capability}-${resource}`.replaceAll('/', '-');
+  return `cg-${grantIdPart(connectionId)}~${grantIdPart(capability)}~${grantIdPart(resource)}`;
+}
+
+function grantIdPart(value: string): string {
+  return encodeURIComponent(value).replaceAll('~', '%7E');
 }
 
 export function mcpCapabilityForRef(ref: string): string {

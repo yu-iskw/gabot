@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CAPABILITY_GITHUB_ISSUES_CREATE,
+  capabilityGrantId,
   defaultOwnerConnections,
   defaultOwnerGrants,
   GITHUB_ALLOWED_REPO,
   matchCapabilityGrant,
+  ownerConnectionId,
   PROVIDER_GITHUB,
 } from './capability-grant.js';
 
@@ -75,5 +77,17 @@ describe('matchCapabilityGrant', () => {
       grants,
     });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('capabilityGrantId', () => {
+  it('keeps slash-equivalent GitHub resources distinct', () => {
+    const connectionId = ownerConnectionId(workspaceId, PROVIDER_GITHUB);
+    expect(
+      capabilityGrantId(connectionId, CAPABILITY_GITHUB_ISSUES_CREATE, 'octo/foo-bar'),
+    ).not.toBe(capabilityGrantId(connectionId, CAPABILITY_GITHUB_ISSUES_CREATE, 'octo-foo/bar'));
+    expect(
+      capabilityGrantId(connectionId, CAPABILITY_GITHUB_ISSUES_CREATE, 'acme/allowed'),
+    ).not.toBe(capabilityGrantId(connectionId, CAPABILITY_GITHUB_ISSUES_CREATE, 'acme-allowed'));
   });
 });

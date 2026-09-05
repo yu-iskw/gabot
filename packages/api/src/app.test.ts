@@ -7,6 +7,7 @@ import {
   GITHUB_CREATE_ISSUE,
   matchesToken,
   personalChannelId,
+  PROVIDER_GITHUB,
   PROVIDER_MOCK_MCP,
   RESOURCE_MCP_ECHO,
   rootAuthority,
@@ -93,6 +94,9 @@ describe('schema sql', () => {
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS runs');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS connections');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS capability_grants');
+    expect(SCHEMA_SQL).toContain(
+      'INSERT INTO connections (id, workspace_id, owner_user_id, provider, credential_ref, status)',
+    );
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS organization_members');
     expect(SCHEMA_SQL).toContain("WHERE channel_id = 'general'");
     expect(SCHEMA_SQL).toContain('FROM channel_memberships');
@@ -912,6 +916,55 @@ describe('capability grants', () => {
       runId: run.id,
     });
     expect(typeof allowRow?.payload.connectionId).toBe('string');
+  });
+
+  it('does not revoke a slash repo when a hyphenated alias is written', async () => {
+    const store = new MemoryStore();
+    const { run, workspace } = await ownerRun(store);
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: PROVIDER_GITHUB,
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: 'octo/foo-bar',
+      granted: true,
+      grantedBy: person.id,
+    });
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: PROVIDER_GITHUB,
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: 'octo-foo/bar',
+      granted: true,
+      grantedBy: person.id,
+    });
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: PROVIDER_GITHUB,
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: 'acme-allowed',
+      granted: false,
+      grantedBy: person.id,
+    });
+    const grants = await store.listCapabilityGrants(workspace.id);
+    const githubResources = grants
+      .filter((grant) => grant.capability === CAPABILITY_GITHUB_ISSUES_CREATE)
+      .map((grant) => grant.resource)
+      .sort();
+    expect(githubResources).toEqual(['acme/allowed', 'octo-foo/bar', 'octo/foo-bar']);
+    const allowed = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: GITHUB_CREATE_ISSUE,
+      args: { repo: GITHUB_ALLOWED_REPO, title: 'Outage' },
+      run,
+    });
+    expect(allowed.ok).toBe(true);
   });
 
   it('lists owner connections', async () => {
