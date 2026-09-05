@@ -534,6 +534,30 @@ describe('control plane', () => {
     expect(run?.botId).toBe('general-assistant');
   });
 
+  it('uses a remaining participant when the default bot was removed', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const removed = await app.request(
+      `/api/channels/${defaultChannel}/participants/general-assistant`,
+      { method: 'DELETE', headers },
+    );
+    expect(removed.status).toBe(200);
+    const result = await executeTurn({
+      store,
+      sandbox: sandbox([]),
+      agent: createScriptedAgentRunner(),
+      mcpUrl: 'http://mcp.test',
+      user: { ...person, isAdmin: true },
+      channelId: defaultChannel,
+      message: 'hello',
+    });
+    const run = await store.getRun(result.runId);
+    expect(run?.status).toBe('succeeded');
+    expect(run?.botId).not.toBe('general-assistant');
+    expect(run?.botId).toBeTruthy();
+  });
+
   it('treats a leading @mention as the root bot', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, ['admin@example.com']);
@@ -1150,6 +1174,28 @@ describe('projects and channels', () => {
       projectId: project.id,
       description: 'Oncall',
     });
+    const cleared = await app.request(`/api/channels/${body.channel.id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ description: '' }),
+    });
+    expect(cleared.status).toBe(200);
+    const afterClear = (await cleared.json()) as { channel: { description: string } };
+    expect(afterClear.channel.description).toBe('');
+    const keep = await app.request(`/api/channels/${body.channel.id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ description: 'Kept' }),
+    });
+    expect(keep.status).toBe(200);
+    const omitted = await app.request(`/api/channels/${body.channel.id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({}),
+    });
+    expect(omitted.status).toBe(200);
+    const afterOmit = (await omitted.json()) as { channel: { description: string } };
+    expect(afterOmit.channel.description).toBe('Kept');
     const scope = await store.getChannelScope(body.channel.id);
     expect(scope?.projectId).toBe(project.id);
   });
@@ -1222,6 +1268,35 @@ describe('projects and channels', () => {
     };
     expect(listed.channels.some((row) => row.id === channel.channel.id)).toBe(false);
     expect(listed.channels.some((row) => row.name === 'General')).toBe(true);
+  });
+
+  it('disables routines on a channel when it is archived', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const created = await app.request('/api/channels', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'Ops' }),
+    });
+    const channel = (await created.json()) as { channel: { id: string } };
+    await store.createRoutine({
+      ownerUserId: person.id,
+      agentId: 'general-assistant',
+      channelId: channel.channel.id,
+      instruction: 'check the queue',
+      cron: '0 9 * * *',
+      nextRunAt: new Date(Date.now() - 60_000),
+    });
+    expect(await store.listDueRoutines(new Date())).toHaveLength(1);
+    const archived = await app.request(`/api/channels/${channel.channel.id}/archive`, {
+      method: 'POST',
+      headers,
+    });
+    expect(archived.status).toBe(200);
+    expect(await store.listDueRoutines(new Date())).toHaveLength(0);
+    const routines = await store.listRoutinesFor(person.id);
+    expect(routines.every((row) => !row.enabled)).toBe(true);
   });
 
   it('does not restore a removed default bot after upsertUser or getUser', async () => {

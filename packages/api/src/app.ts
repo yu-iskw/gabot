@@ -197,7 +197,7 @@ function registerChannelMutationRoutes(
     }
     const body = asRecord(await context.req.json());
     const channel = await options.store.updateChannel(owned.channel.id, {
-      description: asString(body.description) || undefined,
+      description: Object.hasOwn(body, 'description') ? asString(body.description) : undefined,
     });
     if (!channel) {
       return context.json({ error: NOT_FOUND }, 404);

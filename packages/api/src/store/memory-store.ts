@@ -185,6 +185,11 @@ export class MemoryStore implements GabotStore {
       return false;
     }
     channel.deletedAt = new Date();
+    for (const routine of this.routines) {
+      if (routine.channelId === channelId) {
+        routine.enabled = false;
+      }
+    }
     return true;
   }
 

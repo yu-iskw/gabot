@@ -87,8 +87,25 @@ export function isTurnClientError(error: unknown): boolean {
   return error instanceof TurnClientError;
 }
 
+async function defaultParticipantBotId(store: GabotStore, channelId: string): Promise<string> {
+  const bots = (await store.listChannelParticipants(channelId))
+    .filter((row) => row.principalType === 'bot')
+    .map((row) => row.principalId);
+  if (bots.includes(PROTECTED_AGENT_ID)) {
+    return PROTECTED_AGENT_ID;
+  }
+  const fallback = bots[0];
+  if (!fallback) {
+    throw new TurnClientError(`No bot is a participant on channel ${channelId}.`);
+  }
+  return fallback;
+}
+
 export async function executeTurn(input: TurnInput): Promise<TurnResult> {
-  const botId = input.botId ?? mentionedBotId(input.message) ?? PROTECTED_AGENT_ID;
+  const botId =
+    input.botId ??
+    mentionedBotId(input.message) ??
+    (await defaultParticipantBotId(input.store, input.channelId));
   const [scope, participating] = await Promise.all([
     input.store.getChannelScope(input.channelId),
     input.store.isChannelParticipant(input.channelId, 'bot', botId),

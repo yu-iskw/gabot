@@ -136,12 +136,21 @@ export class PostgresStore implements GabotStore {
   }
 
   public async archiveChannel(channelId: string): Promise<boolean> {
-    const rows = await this.sql<{ id: string }[]>`
-      UPDATE channels SET deleted_at = now(), updated_at = now()
-      WHERE id = ${channelId} AND deleted_at IS NULL
-      RETURNING id
-    `;
-    return rows.length > 0;
+    return this.sql.begin(async (sql) => {
+      const rows = await sql<{ id: string }[]>`
+        UPDATE channels SET deleted_at = now(), updated_at = now()
+        WHERE id = ${channelId} AND deleted_at IS NULL
+        RETURNING id
+      `;
+      if (rows.length === 0) {
+        return false;
+      }
+      await sql`
+        UPDATE routines SET enabled = false, updated_at = now()
+        WHERE channel_id = ${channelId} AND enabled = true
+      `;
+      return true;
+    });
   }
 
   public async listProjects(workspaceId: string): Promise<ProjectRecord[]> {
