@@ -5,6 +5,7 @@ import {
   COMPUTER_SCREENSHOT,
   matchesToken,
   mcpCapabilityForRef,
+  personalChannelId,
   PROVIDER_MOCK_MCP,
 } from '@gabot/common';
 import { Hono } from 'hono';
@@ -15,6 +16,9 @@ import { runGatewayAction } from './gateway.js';
 import { getPluginDetail, listPluginViews } from './plugin-views.js';
 import {
   PROTECTED_AGENT_ID,
+  PROJECT_NOT_FOUND,
+  WORKSPACE_NOT_FOUND,
+  type ChannelRecord,
   type GabotStore,
   type SessionUser,
   type WorkspaceRecord,
@@ -43,11 +47,15 @@ type ApiOptions = {
 const BOT = PROTECTED_AGENT_ID;
 const API_AGENTS = '/api/agents';
 const API_CHANNELS = '/api/channels';
+const API_PROJECTS = '/api/projects';
 const API_ROUTINES = '/api/routines';
 const API_SKILLS = '/api/skills';
 const NOT_FOUND = 'Not found';
 const UNAUTHORIZED = 'Unauthorized';
 const INVALID_BODY = 'Invalid body';
+const FORBIDDEN = 'Forbidden';
+const HUMANS_FORBIDDEN = 'Cannot add humans as channel participants';
+const DEFAULT_CHANNEL_LOCKED = 'Cannot archive the default channel';
 const WORKER_SECRET_HEADER = 'x-gabot-worker-secret';
 
 export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariables }> {
@@ -59,6 +67,8 @@ export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariabl
   app.use('/api/me', auth);
   app.use(API_CHANNELS, auth);
   app.use(`${API_CHANNELS}/*`, auth);
+  app.use(API_PROJECTS, auth);
+  app.use(`${API_PROJECTS}/*`, auth);
   app.use('/api/computers', auth);
   app.use('/api/computers/*', auth);
   app.use('/api/admin/*', auth);
@@ -113,13 +123,26 @@ function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     const user = context.get('user');
     const body = asRecord(await context.req.json());
     const name = asString(body.name) || 'New channel';
-    const channel = await options.store.createChannel({
-      name,
-      userId: user.id,
-      agentId: asString(body.agentId) || BOT,
-    });
-    return context.json({ channel }, 201);
+    try {
+      const channel = await options.store.createChannel({
+        name,
+        userId: user.id,
+        agentId: asString(body.agentId) || BOT,
+        projectId: asString(body.projectId) || undefined,
+        description: asString(body.description) || undefined,
+      });
+      return context.json({ channel }, 201);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message === PROJECT_NOT_FOUND || error.message === WORKSPACE_NOT_FOUND)
+      ) {
+        return context.json({ error: NOT_FOUND }, 404);
+      }
+      throw error;
+    }
   });
+  registerChannelMutationRoutes(app, options);
   app.post('/api/channels/:id/turns', async (context) => {
     const user = context.get('user');
     const channelId = context.req.param('id');
@@ -159,7 +182,145 @@ function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options:
   });
 }
 
+function registerChannelMutationRoutes(
+  app: Hono<{ Variables: AuthVariables }>,
+  options: ApiOptions,
+): void {
+  app.patch('/api/channels/:id', async (context) => {
+    const owned = await requireOwnedChannel(
+      options.store,
+      context.get('user'),
+      context.req.param('id'),
+    );
+    if (!owned.ok) {
+      return context.json(owned.body, owned.status);
+    }
+    const body = asRecord(await context.req.json());
+    const channel = await options.store.updateChannel(owned.channel.id, {
+      description: Object.hasOwn(body, 'description') ? asString(body.description) : undefined,
+    });
+    if (!channel) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    return context.json({ channel });
+  });
+  app.post('/api/channels/:id/archive', async (context) => {
+    const owned = await requireOwnedChannel(
+      options.store,
+      context.get('user'),
+      context.req.param('id'),
+    );
+    if (!owned.ok) {
+      return context.json(owned.body, owned.status);
+    }
+    if (owned.channel.id === personalChannelId(context.get('user').id)) {
+      return context.json({ error: DEFAULT_CHANNEL_LOCKED }, 400);
+    }
+    await options.store.archiveChannel(owned.channel.id);
+    return context.json({ ok: true });
+  });
+  app.post('/api/channels/:id/participants', async (context) => {
+    const owned = await requireOwnedChannel(
+      options.store,
+      context.get('user'),
+      context.req.param('id'),
+    );
+    if (!owned.ok) {
+      return context.json(owned.body, owned.status);
+    }
+    const agentId = asString(asRecord(await context.req.json()).agentId);
+    if (!agentId) {
+      return context.json({ error: INVALID_BODY }, 400);
+    }
+    const allowed = await botParticipantOrError(options.store, agentId);
+    if (!allowed.ok) {
+      return context.json(allowed.body, allowed.status);
+    }
+    const participant = {
+      channelId: owned.channel.id,
+      principalType: 'bot' as const,
+      principalId: agentId,
+      role: 'bot',
+    };
+    await options.store.addChannelParticipant(participant);
+    return context.json({ participant }, 201);
+  });
+  app.delete('/api/channels/:id/participants/:agentId', async (context) => {
+    const owned = await requireOwnedChannel(
+      options.store,
+      context.get('user'),
+      context.req.param('id'),
+    );
+    if (!owned.ok) {
+      return context.json(owned.body, owned.status);
+    }
+    const agentId = context.req.param('agentId');
+    const allowed = await botParticipantOrError(options.store, agentId);
+    if (!allowed.ok) {
+      return context.json(allowed.body, allowed.status);
+    }
+    const removed = await options.store.removeChannelParticipant({
+      channelId: owned.channel.id,
+      principalType: 'bot',
+      principalId: agentId,
+    });
+    if (!removed) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    return context.json({ ok: true });
+  });
+  app.get('/api/channels/:id/policies', async (context) => {
+    const owned = await requireOwnedChannel(
+      options.store,
+      context.get('user'),
+      context.req.param('id'),
+    );
+    if (!owned.ok) {
+      return context.json(owned.body, owned.status);
+    }
+    return context.json({ policies: await options.store.listChannelPolicies(owned.channel.id) });
+  });
+  app.put('/api/channels/:id/policies', async (context) => {
+    const owned = await requireOwnedChannel(
+      options.store,
+      context.get('user'),
+      context.req.param('id'),
+    );
+    if (!owned.ok) {
+      return context.json(owned.body, owned.status);
+    }
+    const policies = readChannelPolicies(await context.req.json());
+    if (!policies) {
+      return context.json({ error: INVALID_BODY }, 400);
+    }
+    const saved = await options.store.replaceChannelPolicies(owned.channel.id, policies);
+    return context.json({ policies: saved });
+  });
+}
+
 function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options: ApiOptions): void {
+  app.get(API_PROJECTS, async (context) => {
+    const access = await requireWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
+    return context.json({ projects: await options.store.listProjects(access.workspace.id) });
+  });
+  app.post(API_PROJECTS, async (context) => {
+    const access = await requireWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
+    const name = asString(asRecord(await context.req.json()).name);
+    if (!name) {
+      return context.json({ error: 'name is required' }, 400);
+    }
+    const project = await options.store.createProject({
+      workspaceId: access.workspace.id,
+      name,
+    });
+    return context.json({ project }, 201);
+  });
   app.get(API_AGENTS, async (context) => {
     return context.json({ agents: await options.store.listAgents() });
   });
@@ -402,6 +563,20 @@ async function writePluginGrant(
   });
 }
 
+async function requireWorkspace(
+  store: GabotStore,
+  user: SessionUser,
+): Promise<
+  | { ok: true; workspace: WorkspaceRecord }
+  | { body: Record<string, unknown>; ok: false; status: 404 }
+> {
+  const workspace = await store.getWorkspaceForUser(user.id);
+  if (!workspace) {
+    return { ok: false, status: 404, body: { error: NOT_FOUND } };
+  }
+  return { ok: true, workspace };
+}
+
 async function requireAdminWorkspace(
   store: GabotStore,
   user: SessionUser,
@@ -410,13 +585,9 @@ async function requireAdminWorkspace(
   | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
 > {
   if (!user.isAdmin) {
-    return { ok: false, status: 403, body: { error: 'Forbidden' } };
+    return { ok: false, status: 403, body: { error: FORBIDDEN } };
   }
-  const workspace = await store.getWorkspaceForUser(user.id);
-  if (!workspace) {
-    return { ok: false, status: 404, body: { error: NOT_FOUND } };
-  }
-  return { ok: true, workspace };
+  return requireWorkspace(store, user);
 }
 
 async function persistCapabilityGrant(
@@ -483,7 +654,7 @@ function registerComputerRoutes(
   app.put('/api/computers/policy', async (context) => {
     const user = context.get('user');
     if (!user.isAdmin) {
-      return context.json({ error: 'Forbidden' }, 403);
+      return context.json({ error: FORBIDDEN }, 403);
     }
     const policy = readPolicy(await context.req.json());
     await options.store.setPolicy(policy, user.id);
@@ -619,6 +790,60 @@ function registerInternalRoutes(
 
 function matchesWorker(offered: string | undefined, expected: string): boolean {
   return Boolean(expected) && matchesToken(expected, offered ?? '');
+}
+
+async function requireOwnedChannel(
+  store: GabotStore,
+  user: SessionUser,
+  channelId: string,
+): Promise<
+  | { channel: ChannelRecord; ok: true }
+  | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
+> {
+  const channel = await store.getChannel(channelId, user.id);
+  if (!channel) {
+    return { ok: false, status: 404, body: { error: NOT_FOUND } };
+  }
+  const scope = await store.getChannelScope(channelId);
+  if (!scope || scope.ownerUserId !== user.id) {
+    return { ok: false, status: 403, body: { error: FORBIDDEN } };
+  }
+  return { ok: true, channel };
+}
+
+async function botParticipantOrError(
+  store: GabotStore,
+  agentId: string,
+): Promise<{ body: Record<string, unknown>; ok: false; status: 403 | 404 } | { ok: true }> {
+  const agent = await store.getAgent(agentId);
+  if (agent) {
+    return { ok: true };
+  }
+  const people = await store.listPeople();
+  if (people.some((row) => row.id === agentId)) {
+    return { ok: false, status: 403, body: { error: HUMANS_FORBIDDEN } };
+  }
+  return { ok: false, status: 404, body: { error: NOT_FOUND } };
+}
+
+function readChannelPolicies(
+  value: unknown,
+): Array<{ capability: string; resource: string }> | null {
+  const record = asRecord(value);
+  if (!Array.isArray(record.policies)) {
+    return null;
+  }
+  const policies: Array<{ capability: string; resource: string }> = [];
+  for (const item of record.policies) {
+    const row = asRecord(item);
+    const capability = asString(row.capability);
+    const resource = asString(row.resource);
+    if (!capability || !resource) {
+      return null;
+    }
+    policies.push({ capability, resource });
+  }
+  return policies;
 }
 
 function readPolicy(value: unknown): ActionPolicy {

@@ -1,10 +1,13 @@
 import { IconDeviceDesktop, IconSettings } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 
 import { apiJson, readTurnStream } from './api.js';
 import { AgentProfile } from './components/agents/agent-profile.js';
 import { ChannelAvatar } from './components/channels/channel-avatar.js';
+import { ChannelPolicies } from './components/channels/channel-policies.js';
+import { ChannelRoster } from './components/channels/channel-roster.js';
 import { Composer } from './components/channels/composer.js';
 import { Transcript } from './components/channels/transcript.js';
 import { ComputerPanel } from './components/computer/computer-panel.js';
@@ -12,8 +15,10 @@ import { DetailPanel } from './components/layout/detail-panel.js';
 import { SidebarToggle } from './components/layout/sidebar-toggle.js';
 import { Button } from './components/ui/button.js';
 import { useAuth } from './lib/auth-context.js';
+import { personalChannelId } from './lib/personal-channel.js';
 
 import type { ChannelPane } from './lib/channel-pane.js';
+import type { NamedProject } from './lib/project-channels.js';
 import type { ReactNode } from 'react';
 
 const DEFAULT_BOT = 'general-assistant';
@@ -33,20 +38,34 @@ export function ChannelPage({
   const channels = useQuery({
     queryKey: ['channels'],
     queryFn: async () => {
-      const body = await apiJson<{ channels: Array<{ id: string; name: string }> }>(
-        '/api/channels',
-        await token(),
-      );
+      const body = await apiJson<{
+        channels: Array<{ id: string; name: string; projectId: string }>;
+      }>('/api/channels', await token());
       return body.channels;
     },
   });
-  const channelName = channels.data?.find((row) => row.id === channelId)?.name ?? 'Channel';
+  const projects = useQuery({
+    queryKey: ['projects'],
+    queryFn: async () => {
+      const body = await apiJson<{ projects: NamedProject[] }>('/api/projects', await token());
+      return body.projects;
+    },
+  });
+  const channel = channels.data?.find((row) => row.id === channelId);
+  const channelName = channel?.name ?? 'Channel';
+  const projectName = projects.data?.find((row) => row.id === channel?.projectId)?.name;
   const messages = useQuery({
     queryKey: ['messages', channelId],
     refetchInterval: 2000,
     queryFn: async () => {
       const body = await apiJson<{
-        messages: Array<{ agentId: string | null; content: string; id: string; role: string }>;
+        messages: Array<{
+          agentId: string | null;
+          content: string;
+          createdAt: string;
+          id: string;
+          role: string;
+        }>;
       }>(`/api/channels/${channelId}/messages`, await token());
       return body.messages;
     },
@@ -65,7 +84,12 @@ export function ChannelPage({
     refetchInterval: 2000,
     queryFn: async () => {
       const body = await apiJson<{
-        events: Array<{ id: string; payload: Record<string, unknown>; type: string }>;
+        events: Array<{
+          createdAt: string;
+          id: string;
+          payload: Record<string, unknown>;
+          type: string;
+        }>;
       }>(`/api/channels/${channelId}/events`, await token());
       return body.events;
     },
@@ -91,10 +115,10 @@ export function ChannelPage({
   return (
     <DetailPanel
       open={pane !== null}
-      detail={paneDetail(pane, channelName, watchBotId(messages.data ?? []))}
+      detail={paneDetail(pane, channelId, channelName, watchBotId(messages.data ?? []))}
       onClose={() => onPane(null)}
     >
-      <ChannelHeader name={channelName} pane={pane} onPane={onPane} />
+      <ChannelHeader name={channelName} pane={pane} projectName={projectName} onPane={onPane} />
       <Transcript
         events={events.data ?? []}
         messages={messages.data ?? []}
@@ -124,10 +148,15 @@ function watchBotId(messages: Array<{ agentId: string | null; role: string }>): 
   return last?.agentId ?? DEFAULT_BOT;
 }
 
-function paneDetail(pane: ChannelPane | null, channelName: string, botId: string) {
+function paneDetail(
+  pane: ChannelPane | null,
+  channelId: string,
+  channelName: string,
+  botId: string,
+) {
   switch (pane) {
     case 'settings': {
-      return <AgentProfile agentId={botId} />;
+      return <ChannelSettings botId={botId} channelId={channelId} />;
     }
     case 'watch': {
       return <ComputerPanel botId={botId} name={channelName} />;
@@ -142,14 +171,48 @@ function paneDetail(pane: ChannelPane | null, channelName: string, botId: string
   }
 }
 
+function ChannelSettings({ botId, channelId }: { botId: string; channelId: string }) {
+  const { token, user } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const isDefaultGeneral = Boolean(user && channelId === personalChannelId(user.uid));
+  const archive = useMutation({
+    mutationFn: async () =>
+      apiJson(`/api/channels/${channelId}/archive`, await token(), { method: 'POST' }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['channels'] });
+      await navigate({ to: '/' });
+    },
+  });
+  return (
+    <div className="flex w-full flex-col gap-6 p-6">
+      <ChannelRoster channelId={channelId} />
+      <ChannelPolicies channelId={channelId} />
+      {isDefaultGeneral ? null : (
+        <Button
+          data-testid="archive-channel"
+          disabled={archive.isPending}
+          variant="outline"
+          onClick={() => archive.mutate()}
+        >
+          Archive channel
+        </Button>
+      )}
+      <AgentProfile agentId={botId} />
+    </div>
+  );
+}
+
 function ChannelHeader({
   name,
   onPane,
   pane,
+  projectName,
 }: {
   name: string;
   onPane: (next: ChannelPane | null) => void;
   pane: ChannelPane | null;
+  projectName?: string;
 }) {
   const watching = pane === 'watch';
   const settings = pane === 'settings';
@@ -158,7 +221,12 @@ function ChannelHeader({
       <div className="flex min-w-0 items-center gap-1.5">
         <SidebarToggle />
         <ChannelAvatar name={name} size={22} />
-        <h1 className="min-w-0 truncate text-sm tracking-tight">{name}</h1>
+        <div className="min-w-0">
+          <h1 className="min-w-0 truncate text-sm tracking-tight">{name}</h1>
+          {projectName ? (
+            <p className="truncate text-[11px] text-muted-foreground">{projectName}</p>
+          ) : null}
+        </div>
       </div>
       <div className="flex flex-row gap-1.5">
         <PaneToggle

@@ -15,6 +15,7 @@ import {
   evaluateActionPolicy,
   GITHUB_CREATE_ISSUE,
   matchCapabilityGrant,
+  matchChannelPolicy,
   MCP_ECHO,
   nextRoutineRun,
   pageHost,
@@ -252,9 +253,10 @@ async function authorizeCapability(
     });
     return { ok: false, result: { ok: false, reason: message, matched: 'grant', output: message } };
   }
-  const [connections, grants] = await Promise.all([
+  const [connections, grants, policies] = await Promise.all([
     input.store.listOwnerConnections(input.run.workspaceId),
     input.store.listCapabilityGrants(input.run.workspaceId),
+    input.store.listChannelPolicies(input.run.channelId),
   ]);
   const match = matchCapabilityGrant({
     workspaceId: input.run.workspaceId,
@@ -274,6 +276,29 @@ async function authorizeCapability(
     return {
       ok: false,
       result: { ok: false, reason: match.reason, matched: 'grant', output: match.reason },
+    };
+  }
+  const policy = matchChannelPolicy({
+    channelId: input.run.channelId,
+    capability,
+    resource,
+    policies,
+  });
+  if (!policy.ok) {
+    await writeAudit(input, TOOL_DENIED, {
+      capability,
+      resource,
+      decision: 'deny',
+      reason: policy.reason,
+    });
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        reason: policy.reason,
+        matched: 'channel-policy',
+        output: policy.reason,
+      },
     };
   }
   return {

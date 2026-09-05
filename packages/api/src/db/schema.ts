@@ -1,4 +1,12 @@
-import { integer, jsonb, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
+import {
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 
@@ -37,7 +45,10 @@ export const channels = pgTable('channels', {
   description: text('description').notNull(),
   lastMessage: text('last_message'),
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
-  projectId: text('project_id'),
+  projectId: text('project_id')
+    .notNull()
+    .references(() => projects.id),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -114,14 +125,18 @@ export const organizationMembers = pgTable(
   (table) => [primaryKey({ columns: [table.organizationId, table.userId] })],
 );
 
-export const workspaces = pgTable('workspaces', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id').notNull(),
-  ownerUserId: text('owner_user_id').notNull(),
-  name: text('name').notNull(),
-  createdAt: createdAt(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const workspaces = pgTable(
+  'workspaces',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id').notNull(),
+    ownerUserId: text('owner_user_id').notNull(),
+    name: text('name').notNull(),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('workspaces_owner_user_id_uidx').on(table.ownerUserId)],
+);
 
 export const projects = pgTable('projects', {
   id: text('id').primaryKey(),
@@ -150,6 +165,19 @@ export const capabilityGrants = pgTable('capability_grants', {
   grantedBy: text('granted_by'),
   createdAt: createdAt(),
 });
+
+export const channelPolicies = pgTable(
+  'channel_policies',
+  {
+    channelId: text('channel_id')
+      .notNull()
+      .references(() => channels.id, { onDelete: 'cascade' }),
+    capability: text('capability').notNull(),
+    resource: text('resource').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [primaryKey({ columns: [table.channelId, table.capability, table.resource] })],
+);
 
 export const channelParticipants = pgTable(
   'channel_participants',

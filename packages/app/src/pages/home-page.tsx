@@ -1,18 +1,25 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
+import { useState } from 'react';
 
 import { apiJson, readTurnStream } from '../api.js';
 import { AgentCard } from '../components/agents/agent-card.js';
 import { Composer } from '../components/channels/composer.js';
 import { SidebarToggleBar } from '../components/layout/sidebar-toggle.js';
+import { Input } from '../components/ui/input.js';
 import { useAuth } from '../lib/auth-context.js';
+import { resolveProjectId } from '../lib/resolve-project-id.js';
 
 import type { Coworker } from '../lib/agents.js';
+import type { NamedProject } from '../lib/project-channels.js';
 
 export function HomePage() {
   const { token } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [projectId, setProjectId] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [description, setDescription] = useState('');
   const agents = useQuery({
     queryKey: ['agents'],
     queryFn: async () => {
@@ -20,13 +27,24 @@ export function HomePage() {
       return body.agents;
     },
   });
+  const projects = useQuery({
+    queryKey: ['projects'],
+    queryFn: async () => {
+      const body = await apiJson<{ projects: NamedProject[] }>('/api/projects', await token());
+      return body.projects;
+    },
+  });
+  const selectedProject = projectId || projects.data?.[0]?.id || '';
+
   const openAgent = useMutation({
     mutationFn: async (agent: Coworker) => {
-      const created = await apiJson<{ channel: { id: string } }>('/api/channels', await token(), {
-        method: 'POST',
-        body: JSON.stringify({ name: agent.title || agent.name, agentId: agent.id }),
+      const auth = await token();
+      return createChannel(auth, {
+        name: agent.title || agent.name,
+        agentId: agent.id,
+        projectId: await projectIdForCreate(auth, selectedProject, newProjectName, queryClient),
+        description: description || undefined,
       });
-      return created.channel.id;
     },
     onSuccess: async (channelId) => {
       await queryClient.invalidateQueries({ queryKey: ['channels'] });
@@ -35,20 +53,20 @@ export function HomePage() {
   });
   const start = useMutation({
     mutationFn: async (input: { botId: string | null; message: string }) => {
-      const created = await apiJson<{ channel: { id: string } }>('/api/channels', await token(), {
-        method: 'POST',
-        body: JSON.stringify({
-          name: channelNameFrom(input.message),
-          agentId: input.botId || undefined,
-        }),
+      const auth = await token();
+      const channelId = await createChannel(auth, {
+        name: channelNameFrom(input.message),
+        agentId: input.botId || undefined,
+        projectId: await projectIdForCreate(auth, selectedProject, newProjectName, queryClient),
+        description: description || undefined,
       });
       await readTurnStream(
-        `/api/channels/${created.channel.id}/turns`,
+        `/api/channels/${channelId}/turns`,
         await token(),
         input.message,
         input.botId,
       );
-      return created.channel.id;
+      return channelId;
     },
     onSuccess: async (channelId) => {
       await queryClient.invalidateQueries({ queryKey: ['channels'] });
@@ -69,6 +87,42 @@ export function HomePage() {
           </h1>
         </div>
         <div className="mt-8 flex w-full max-w-2xl flex-col items-center">
+          <div className="mb-3 grid w-full gap-2 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm">
+              Project
+              <select
+                aria-label="Project"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="project-select"
+                value={selectedProject}
+                onChange={(event) => setProjectId(event.target.value)}
+              >
+                {(projects.data ?? []).map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              New project
+              <Input
+                aria-label="New project name"
+                placeholder="Optional name"
+                value={newProjectName}
+                onChange={(event) => setNewProjectName(event.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+              Description
+              <Input
+                aria-label="Channel description"
+                placeholder="Optional"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
+          </div>
           <Composer
             className="w-full"
             pending={start.isPending}
@@ -101,4 +155,31 @@ export function HomePage() {
 function channelNameFrom(message: string): string {
   const words = message.trim().split(/\s+/).slice(0, 6).join(' ');
   return words.length > 0 ? words : 'New channel';
+}
+
+async function projectIdForCreate(
+  token: string,
+  selectedProject: string,
+  newProjectName: string,
+  queryClient: QueryClient,
+): Promise<string | undefined> {
+  return resolveProjectId(selectedProject, newProjectName, async (name) => {
+    const created = await apiJson<{ project: { id: string } }>('/api/projects', token, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+    await queryClient.invalidateQueries({ queryKey: ['projects'] });
+    return created.project.id;
+  });
+}
+
+async function createChannel(
+  token: string,
+  body: { agentId?: string; description?: string; name: string; projectId?: string },
+): Promise<string> {
+  const created = await apiJson<{ channel: { id: string } }>('/api/channels', token, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return created.channel.id;
 }

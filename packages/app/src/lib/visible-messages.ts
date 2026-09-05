@@ -4,7 +4,7 @@ type ChatMessage = {
   role: string;
 };
 
-export function visibleMessages(messages: ChatMessage[]): ChatMessage[] {
+export function visibleMessages<T extends ChatMessage>(messages: T[]): T[] {
   return messages.filter((message, index) => shouldShow(messages, index, message));
 }
 

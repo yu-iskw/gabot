@@ -2,6 +2,7 @@ import {
   asStringArray,
   DEFAULT_ALLOW_POLICY,
   DEFAULT_CHANNEL_NAME,
+  DEFAULT_PROJECT_NAME,
   defaultChannelParticipants,
   nextRoutineRun,
   personalChannelId,
@@ -11,6 +12,7 @@ import {
 } from '@gabot/common';
 import postgres from 'postgres';
 
+import { uniquePolicies } from './channel-policies.js';
 import {
   insertDefaultOwnerConnections,
   selectCapabilityGrants,
@@ -19,7 +21,7 @@ import {
 } from './postgres-connections.js';
 import { insertDelegatedChild } from './postgres-delegation.js';
 import { parseEnvelope, toRunRecord, type DbRun } from './postgres-run-map.js';
-import { PROTECTED_AGENT_ID } from './types.js';
+import { PROTECTED_AGENT_ID, PROJECT_NOT_FOUND, WORKSPACE_NOT_FOUND } from './types.js';
 
 import type {
   AgentPatch,
@@ -30,6 +32,8 @@ import type {
   CapabilityGrantWrite,
   ChannelEventRecord,
   ChannelParticipant,
+  ChannelPatch,
+  ChannelPolicyRecord,
   ChannelRecord,
   ChannelScope,
   DelegatedChildInput,
@@ -39,6 +43,7 @@ import type {
   OwnerConnectionRecord,
   PluginRecord,
   PluginTool,
+  ProjectRecord,
   RoutineListItem,
   RoutinePatch,
   RoutineRecord,
@@ -88,20 +93,91 @@ export class PostgresStore implements GabotStore {
 
   public async listChannels(userId: string): Promise<ChannelRecord[]> {
     return await this.sql<ChannelRecord[]>`
-      SELECT c.id, c.name, c.description, c.last_message AS "lastMessage"
+      SELECT c.id, c.name, c.description, c.last_message AS "lastMessage",
+             c.project_id AS "projectId"
       FROM channels c
       JOIN channel_participants p ON p.channel_id = c.id
       WHERE p.principal_type = 'user' AND p.principal_id = ${userId}
+        AND c.deleted_at IS NULL
       ORDER BY c.created_at
     `;
   }
 
   public async getChannel(channelId: string, userId: string): Promise<ChannelRecord | null> {
     const rows = await this.sql<ChannelRecord[]>`
-      SELECT c.id, c.name, c.description, c.last_message AS "lastMessage"
+      SELECT c.id, c.name, c.description, c.last_message AS "lastMessage",
+             c.project_id AS "projectId"
       FROM channels c
       JOIN channel_participants p ON p.channel_id = c.id
       WHERE c.id = ${channelId} AND p.principal_type = 'user' AND p.principal_id = ${userId}
+        AND c.deleted_at IS NULL
+    `;
+    return rows.at(0) ?? null;
+  }
+
+  public async updateChannel(
+    channelId: string,
+    patch: ChannelPatch,
+  ): Promise<ChannelRecord | null> {
+    if (patch.description === undefined) {
+      const rows = await this.sql<ChannelRecord[]>`
+        SELECT id, name, description, last_message AS "lastMessage", project_id AS "projectId"
+        FROM channels WHERE id = ${channelId} AND deleted_at IS NULL
+      `;
+      return rows.at(0) ?? null;
+    }
+    const rows = await this.sql<ChannelRecord[]>`
+      UPDATE channels
+      SET description = ${patch.description}, updated_at = now()
+      WHERE id = ${channelId} AND deleted_at IS NULL
+      RETURNING id, name, description, last_message AS "lastMessage", project_id AS "projectId"
+    `;
+    return rows.at(0) ?? null;
+  }
+
+  public async archiveChannel(channelId: string): Promise<boolean> {
+    return this.sql.begin(async (sql) => {
+      const rows = await sql<{ id: string }[]>`
+        UPDATE channels SET deleted_at = now(), updated_at = now()
+        WHERE id = ${channelId} AND deleted_at IS NULL
+        RETURNING id
+      `;
+      if (rows.length === 0) {
+        return false;
+      }
+      await sql`
+        UPDATE routines SET enabled = false, updated_at = now()
+        WHERE channel_id = ${channelId} AND enabled = true
+      `;
+      return true;
+    });
+  }
+
+  public async listProjects(workspaceId: string): Promise<ProjectRecord[]> {
+    return this.sql<ProjectRecord[]>`
+      SELECT id, workspace_id AS "workspaceId", name
+      FROM projects WHERE workspace_id = ${workspaceId}
+      ORDER BY created_at, id
+    `;
+  }
+
+  public async createProject(input: { name: string; workspaceId: string }): Promise<ProjectRecord> {
+    const id = `proj_${crypto.randomUUID()}`;
+    const rows = await this.sql<ProjectRecord[]>`
+      INSERT INTO projects (id, workspace_id, name)
+      VALUES (${id}, ${input.workspaceId}, ${input.name})
+      RETURNING id, workspace_id AS "workspaceId", name
+    `;
+    const row = rows.at(0);
+    if (row === undefined) {
+      throw new Error('Failed to create project.');
+    }
+    return row;
+  }
+
+  public async getProject(projectId: string): Promise<ProjectRecord | null> {
+    const rows = await this.sql<ProjectRecord[]>`
+      SELECT id, workspace_id AS "workspaceId", name FROM projects WHERE id = ${projectId}
     `;
     return rows.at(0) ?? null;
   }
@@ -362,6 +438,16 @@ export class PostgresStore implements GabotStore {
     `;
   }
 
+  public async getAgent(id: string): Promise<AgentProfile | null> {
+    const rows = await this.sql<AgentProfile[]>`
+      SELECT a.id, a.name, p.title, p.role_description AS "roleDescription", p.visibility
+      FROM agents a
+      JOIN agent_profiles p ON p.agent_id = a.id
+      WHERE a.id = ${id}
+    `;
+    return rows.at(0) ?? null;
+  }
+
   public async createAgent(input: {
     name: string;
     title: string;
@@ -431,23 +517,31 @@ export class PostgresStore implements GabotStore {
   }
 
   public async createChannel(input: {
-    name: string;
-    userId: string;
     agentId?: string;
+    description?: string;
+    name: string;
+    projectId?: string;
+    userId: string;
   }): Promise<ChannelRecord> {
     const workspace = await this.getWorkspaceForUser(input.userId);
     if (!workspace) {
-      throw new Error('Workspace not found.');
+      throw new Error(WORKSPACE_NOT_FOUND);
+    }
+    const projectId = input.projectId ?? workspace.projectId;
+    const project = await this.getProject(projectId);
+    if (!project || project.workspaceId !== workspace.id) {
+      throw new Error(PROJECT_NOT_FOUND);
     }
     const id = `channel_${crypto.randomUUID()}`;
+    const description = input.description ?? '';
     await this.sql.begin(async (sql) => {
       await sql`
         INSERT INTO channels (id, name, description, project_id)
-        VALUES (${id}, ${input.name}, '', ${workspace.projectId})
+        VALUES (${id}, ${input.name}, ${description}, ${projectId})
       `;
       await this.attachChannelParties(sql, id, input.userId, input.agentId);
     });
-    return { id, name: input.name, description: '', lastMessage: null };
+    return { id, name: input.name, description, lastMessage: null, projectId };
   }
 
   public async listSkills(): Promise<SkillRecord[]> {
@@ -606,9 +700,8 @@ export class PostgresStore implements GabotStore {
     >`
       SELECT w.id, w.organization_id, w.owner_user_id, w.name, p.id AS project_id
       FROM workspaces w
-      JOIN projects p ON p.workspace_id = w.id
+      JOIN projects p ON p.workspace_id = w.id AND p.id = ${personalProjectId(userId)}
       WHERE w.owner_user_id = ${userId}
-      ORDER BY w.created_at
       LIMIT 1
     `;
     const row = rows.at(0);
@@ -682,6 +775,50 @@ export class PostgresStore implements GabotStore {
       VALUES (${input.channelId}, ${input.principalType}, ${input.principalId}, ${input.role})
       ON CONFLICT DO NOTHING
     `;
+  }
+
+  public async removeChannelParticipant(
+    input: Pick<ChannelParticipant, 'channelId' | 'principalId' | 'principalType'>,
+  ): Promise<boolean> {
+    const rows = await this.sql<{ principal_id: string }[]>`
+      DELETE FROM channel_participants
+      WHERE channel_id = ${input.channelId}
+        AND principal_type = ${input.principalType}
+        AND principal_id = ${input.principalId}
+      RETURNING principal_id
+    `;
+    return rows.length > 0;
+  }
+
+  public async listChannelPolicies(channelId: string): Promise<ChannelPolicyRecord[]> {
+    return this.sql<ChannelPolicyRecord[]>`
+      SELECT channel_id AS "channelId", capability, resource
+      FROM channel_policies WHERE channel_id = ${channelId}
+      ORDER BY capability, resource
+    `;
+  }
+
+  public async replaceChannelPolicies(
+    channelId: string,
+    policies: Array<{ capability: string; resource: string }>,
+  ): Promise<ChannelPolicyRecord[]> {
+    const unique = uniquePolicies(channelId, policies);
+    await this.sql.begin(async (sql) => {
+      await sql`DELETE FROM channel_policies WHERE channel_id = ${channelId}`;
+      if (unique.length === 0) {
+        return;
+      }
+      await sql`
+        INSERT INTO channel_policies ${sql(
+          unique.map((policy) => ({
+            channel_id: policy.channelId,
+            capability: policy.capability,
+            resource: policy.resource,
+          })),
+        )}
+      `;
+    });
+    return unique;
   }
 
   public async appendChannelEvent(input: {
@@ -902,17 +1039,24 @@ export class PostgresStore implements GabotStore {
       `;
       await sql`
         INSERT INTO projects (id, workspace_id, name)
-        VALUES (${projectId}, ${workspaceId}, 'Default')
+        VALUES (${projectId}, ${workspaceId}, ${DEFAULT_PROJECT_NAME})
         ON CONFLICT (id) DO NOTHING
       `;
-      await sql`
+      const createdChannel = await sql<{ id: string }[]>`
         INSERT INTO channels (id, name, description, project_id)
         VALUES (${channelId}, ${DEFAULT_CHANNEL_NAME}, 'Default coworker channel', ${projectId})
         ON CONFLICT (id) DO NOTHING
+        RETURNING id
       `;
       await Promise.all([
         this.retireSharedGeneral(sql, user.id),
-        this.attachChannelParties(sql, channelId, user.id),
+        createdChannel.length > 0
+          ? this.attachChannelParties(sql, channelId, user.id)
+          : sql`
+              INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+              VALUES (${channelId}, 'user', ${user.id}, 'owner')
+              ON CONFLICT DO NOTHING
+            `,
         insertDefaultOwnerConnections(sql, workspaceId, user.id, created.length > 0),
       ]);
     });
