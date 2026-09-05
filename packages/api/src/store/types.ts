@@ -8,10 +8,27 @@ import {
 } from '@gabot/common';
 
 export type ChannelRecord = {
+  description: string;
+  id: string;
+  lastMessage: string | null;
+  name: string;
+  projectId: string;
+};
+
+export type ProjectRecord = {
   id: string;
   name: string;
-  description: string;
-  lastMessage: string | null;
+  workspaceId: string;
+};
+
+export type ChannelPolicyRecord = {
+  capability: string;
+  channelId: string;
+  resource: string;
+};
+
+export type ChannelPatch = {
+  description?: string;
 };
 
 export type MessageRecord = {
@@ -204,10 +221,18 @@ export class DelegationBudgetError extends Error {
   }
 }
 
+export const PROJECT_NOT_FOUND = 'Project not found.';
+export const WORKSPACE_NOT_FOUND = 'Workspace not found.';
+
 export type GabotStore = {
   upsertUser(person: VerifiedPerson, adminEmails: string[]): Promise<SessionUser>;
   listChannels(userId: string): Promise<ChannelRecord[]>;
   getChannel(channelId: string, userId: string): Promise<ChannelRecord | null>;
+  updateChannel(channelId: string, patch: ChannelPatch): Promise<ChannelRecord | null>;
+  archiveChannel(channelId: string): Promise<boolean>;
+  listProjects(workspaceId: string): Promise<ProjectRecord[]>;
+  createProject(input: { name: string; workspaceId: string }): Promise<ProjectRecord>;
+  getProject(projectId: string): Promise<ProjectRecord | null>;
   appendMessage(input: {
     channelId: string;
     role: string;
@@ -250,7 +275,13 @@ export type GabotStore = {
   }): Promise<AgentProfile>;
   updateAgent(id: string, patch: AgentPatch): Promise<AgentProfile | null>;
   deleteAgent(id: string): Promise<boolean>;
-  createChannel(input: { name: string; userId: string; agentId?: string }): Promise<ChannelRecord>;
+  createChannel(input: {
+    agentId?: string;
+    description?: string;
+    name: string;
+    projectId?: string;
+    userId: string;
+  }): Promise<ChannelRecord>;
   listSkills(): Promise<SkillRecord[]>;
   getSkill(slug: string): Promise<SkillRecord | null>;
   upsertSkill(input: {
@@ -292,6 +323,14 @@ export type GabotStore = {
     principalId: string,
   ): Promise<boolean>;
   addChannelParticipant(input: ChannelParticipant): Promise<void>;
+  removeChannelParticipant(
+    input: Pick<ChannelParticipant, 'channelId' | 'principalId' | 'principalType'>,
+  ): Promise<boolean>;
+  listChannelPolicies(channelId: string): Promise<ChannelPolicyRecord[]>;
+  replaceChannelPolicies(
+    channelId: string,
+    policies: Array<{ capability: string; resource: string }>,
+  ): Promise<ChannelPolicyRecord[]>;
   appendChannelEvent(input: {
     actorId?: string;
     actorType: string;

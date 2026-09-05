@@ -1,5 +1,6 @@
 export const PLATFORM_ORG_ID = 'org-gabot';
 export const DEFAULT_CHANNEL_NAME = 'General';
+export const DEFAULT_PROJECT_NAME = 'Default';
 export const GENERAL_ASSISTANT_ID = 'general-assistant';
 
 export type TeamBotProfile = {

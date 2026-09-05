@@ -7,6 +7,7 @@ import {
   cloneAuthority,
   DEFAULT_ALLOW_POLICY,
   DEFAULT_CHANNEL_NAME,
+  DEFAULT_PROJECT_NAME,
   defaultChannelParticipants,
   defaultOwnerConnections,
   defaultOwnerGrants,
@@ -19,7 +20,13 @@ import {
   TEAM_BOT_PROFILES,
 } from '@gabot/common';
 
-import { DelegationBudgetError, PROTECTED_AGENT_ID } from './types.js';
+import { uniquePolicies } from './channel-policies.js';
+import {
+  DelegationBudgetError,
+  PROJECT_NOT_FOUND,
+  PROTECTED_AGENT_ID,
+  WORKSPACE_NOT_FOUND,
+} from './types.js';
 
 import type {
   AgentPatch,
@@ -30,6 +37,8 @@ import type {
   CapabilityGrantWrite,
   ChannelEventRecord,
   ChannelParticipant,
+  ChannelPatch,
+  ChannelPolicyRecord,
   ChannelRecord,
   ChannelScope,
   DelegatedChildInput,
@@ -39,6 +48,7 @@ import type {
   OwnerConnectionRecord,
   PluginRecord,
   PluginTool,
+  ProjectRecord,
   RoutineListItem,
   RoutinePatch,
   RoutineRecord,
@@ -63,7 +73,8 @@ type WorkRow = WorkRecord & {
   lastError: string | null;
 };
 type RoutineRow = RoutineListItem;
-type ChannelRow = ChannelRecord & { projectId: string };
+type ChannelRow = ChannelRecord & { deletedAt: Date | null };
+type ProjectRow = ProjectRecord;
 type WorkspaceRow = {
   id: string;
   name: string;
@@ -75,9 +86,11 @@ type WorkspaceRow = {
 export class MemoryStore implements GabotStore {
   private readonly users = new Map<string, UserRow>();
   private readonly workspaces = new Map<string, WorkspaceRow>();
+  private readonly projects = new Map<string, ProjectRow>();
   private readonly channels = new Map<string, ChannelRow>();
   private readonly participants: ChannelParticipant[] = [];
   private readonly events: ChannelEventRecord[] = [];
+  private readonly channelPolicies: ChannelPolicyRecord[] = [];
   private readonly runs = new Map<string, RunRecord>();
   private readonly delegations: DelegationRecord[] = [];
   private readonly messages: MessageRecord[] = [];
@@ -135,7 +148,9 @@ export class MemoryStore implements GabotStore {
         .filter((row) => row.principalType === 'user' && row.principalId === userId)
         .map((row) => row.channelId),
     );
-    return [...this.channels.values()].filter((channel) => ids.has(channel.id));
+    return [...this.channels.values()]
+      .filter((channel) => ids.has(channel.id) && channel.deletedAt === null)
+      .map(toChannelRecord);
   }
 
   public async getChannel(channelId: string, userId: string): Promise<ChannelRecord | null> {
@@ -143,7 +158,55 @@ export class MemoryStore implements GabotStore {
       (row) =>
         row.channelId === channelId && row.principalType === 'user' && row.principalId === userId,
     );
-    return allowed ? (this.channels.get(channelId) ?? null) : null;
+    const channel = this.channels.get(channelId);
+    if (!allowed || !channel || channel.deletedAt !== null) {
+      return null;
+    }
+    return toChannelRecord(channel);
+  }
+
+  public async updateChannel(
+    channelId: string,
+    patch: ChannelPatch,
+  ): Promise<ChannelRecord | null> {
+    const channel = this.channels.get(channelId);
+    if (!channel || channel.deletedAt !== null) {
+      return null;
+    }
+    if (patch.description !== undefined) {
+      channel.description = patch.description;
+    }
+    return toChannelRecord(channel);
+  }
+
+  public async archiveChannel(channelId: string): Promise<boolean> {
+    const channel = this.channels.get(channelId);
+    if (!channel || channel.deletedAt !== null) {
+      return false;
+    }
+    channel.deletedAt = new Date();
+    return true;
+  }
+
+  public async listProjects(workspaceId: string): Promise<ProjectRecord[]> {
+    return [...this.projects.values()]
+      .filter((row) => row.workspaceId === workspaceId)
+      .map((row) => ({ ...row }));
+  }
+
+  public async createProject(input: { name: string; workspaceId: string }): Promise<ProjectRecord> {
+    const record: ProjectRecord = {
+      id: `proj_${randomUUID()}`,
+      workspaceId: input.workspaceId,
+      name: input.name,
+    };
+    this.projects.set(record.id, record);
+    return { ...record };
+  }
+
+  public async getProject(projectId: string): Promise<ProjectRecord | null> {
+    const row = this.projects.get(projectId);
+    return row ? { ...row } : null;
   }
 
   public async appendMessage(input: {
@@ -387,20 +450,28 @@ export class MemoryStore implements GabotStore {
   }
 
   public async createChannel(input: {
-    name: string;
-    userId: string;
     agentId?: string;
+    description?: string;
+    name: string;
+    projectId?: string;
+    userId: string;
   }): Promise<ChannelRecord> {
     const workspace = this.workspaces.get(personalWorkspaceId(input.userId));
     if (!workspace) {
-      throw new Error('Workspace not found.');
+      throw new Error(WORKSPACE_NOT_FOUND);
+    }
+    const projectId = input.projectId ?? workspace.projectId;
+    const project = this.projects.get(projectId);
+    if (!project || project.workspaceId !== workspace.id) {
+      throw new Error(PROJECT_NOT_FOUND);
     }
     const channel: ChannelRow = {
       id: `channel_${randomUUID()}`,
       name: input.name,
-      description: '',
+      description: input.description ?? '',
       lastMessage: null,
-      projectId: workspace.projectId,
+      projectId,
+      deletedAt: null,
     };
     this.channels.set(channel.id, channel);
     this.attachChannelParties(channel.id, input.userId, input.agentId);
@@ -412,9 +483,11 @@ export class MemoryStore implements GabotStore {
     if (!channel) {
       return null;
     }
-    const workspace = [...this.workspaces.values()].find(
-      (row) => row.projectId === channel.projectId,
-    );
+    const project = this.projects.get(channel.projectId);
+    if (!project) {
+      return null;
+    }
+    const workspace = this.workspaces.get(project.workspaceId);
     if (!workspace) {
       return null;
     }
@@ -447,6 +520,39 @@ export class MemoryStore implements GabotStore {
 
   public async addChannelParticipant(input: ChannelParticipant): Promise<void> {
     this.rememberParticipant(input);
+  }
+
+  public async removeChannelParticipant(
+    input: Pick<ChannelParticipant, 'channelId' | 'principalId' | 'principalType'>,
+  ): Promise<boolean> {
+    const index = this.participants.findIndex(
+      (row) =>
+        row.channelId === input.channelId &&
+        row.principalType === input.principalType &&
+        row.principalId === input.principalId,
+    );
+    if (index < 0) {
+      return false;
+    }
+    this.participants.splice(index, 1);
+    return true;
+  }
+
+  public async listChannelPolicies(channelId: string): Promise<ChannelPolicyRecord[]> {
+    return this.channelPolicies
+      .filter((row) => row.channelId === channelId)
+      .map((row) => ({ ...row }));
+  }
+
+  public async replaceChannelPolicies(
+    channelId: string,
+    policies: Array<{ capability: string; resource: string }>,
+  ): Promise<ChannelPolicyRecord[]> {
+    const remaining = this.channelPolicies.filter((row) => row.channelId !== channelId);
+    const next = uniquePolicies(channelId, policies);
+    this.channelPolicies.length = 0;
+    this.channelPolicies.push(...remaining, ...next);
+    return next.map((row) => ({ ...row }));
   }
 
   public async appendChannelEvent(input: {
@@ -794,6 +900,13 @@ export class MemoryStore implements GabotStore {
         projectId,
       });
     }
+    if (!this.projects.has(projectId)) {
+      this.projects.set(projectId, {
+        id: projectId,
+        workspaceId,
+        name: DEFAULT_PROJECT_NAME,
+      });
+    }
     if (!this.channels.has(channelId)) {
       this.channels.set(channelId, {
         id: channelId,
@@ -801,6 +914,7 @@ export class MemoryStore implements GabotStore {
         description: 'Default coworker channel',
         lastMessage: null,
         projectId,
+        deletedAt: null,
       });
     }
     this.attachChannelParties(channelId, user.id);
@@ -865,6 +979,7 @@ function toChannelRecord(channel: ChannelRow): ChannelRecord {
     name: channel.name,
     description: channel.description,
     lastMessage: channel.lastMessage,
+    projectId: channel.projectId,
   };
 }
 

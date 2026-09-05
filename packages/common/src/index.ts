@@ -67,6 +67,8 @@ export {
   RESOURCE_COMPONENT_NOTE,
   RESOURCE_MCP_ECHO,
 } from './capability-grant.js';
+export { matchChannelPolicy } from './channel-policy.js';
+export type { ChannelPolicy, ChannelPolicyMatch } from './channel-policy.js';
 export type {
   CapabilityGrant,
   ConnectionStatus,
@@ -94,6 +96,7 @@ export {
   botIdentityContent,
   parseBotIdentityContent,
   DEFAULT_CHANNEL_NAME,
+  DEFAULT_PROJECT_NAME,
   DEFAULT_TEAM_BOT_IDS,
   defaultChannelParticipants,
   GENERAL_ASSISTANT_ID,

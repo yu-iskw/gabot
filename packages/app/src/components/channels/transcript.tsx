@@ -6,6 +6,7 @@ import { apiJson } from '../../api.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { splitSkillChip } from '../../lib/skill-chip.js';
 import { captionForTool } from '../../lib/tool-caption.js';
+import { interleaveTranscript } from '../../lib/transcript-timeline.js';
 import { visibleMessages } from '../../lib/visible-messages.js';
 
 import { AssistantProse } from './assistant-prose.js';
@@ -15,11 +16,13 @@ import { ToolLine } from './tool-line.js';
 type TranscriptMessage = {
   agentId?: string | null;
   content: string;
+  createdAt?: Date | string;
   id: string;
   role: string;
 };
 
 type ChannelEvent = {
+  createdAt?: Date | string;
   id: string;
   payload: Record<string, unknown>;
   type: string;
@@ -43,21 +46,24 @@ export function Transcript({
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' });
-  }, [messages, pending]);
+  }, [messages, events, pending]);
+
+  const rows = interleaveTranscript(visibleMessages(messages), runEvents(events));
 
   return (
     <ul data-testid="messages" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-4">
-      {visibleMessages(messages).map((message) => (
-        <li key={message.id}>{renderMessage(message, commandNames)}</li>
-      ))}
-      {runEvents(events).map((event) => (
-        <li key={event.id}>
-          <details className="pb-3 text-xs text-muted-foreground" data-testid="channel-event">
-            <summary>{eventCaption(event)}</summary>
-            {eventDetail(event)}
-          </details>
-        </li>
-      ))}
+      {rows.map((row) =>
+        row.kind === 'message' ? (
+          <li key={row.id}>{renderMessage(row.message, commandNames)}</li>
+        ) : (
+          <li key={row.id}>
+            <details className="pb-3 text-xs text-muted-foreground" data-testid="channel-event">
+              <summary>{eventCaption(row.event)}</summary>
+              {eventDetail(row.event)}
+            </details>
+          </li>
+        ),
+      )}
       {pending ? (
         <li>
           <p className="tool-line-running text-sm text-muted-foreground" role="status">

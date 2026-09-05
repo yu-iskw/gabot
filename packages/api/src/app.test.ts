@@ -90,10 +90,14 @@ describe('schema sql', () => {
     expect(schema.workspaces).toBeDefined();
     expect(schema.connections).toBeDefined();
     expect(schema.capabilityGrants).toBeDefined();
+    expect(schema.channelPolicies).toBeDefined();
     expect(schema.organizationMembers).toBeDefined();
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS runs');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS connections');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS capability_grants');
+    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS channel_policies');
+    expect(SCHEMA_SQL).toContain('workspaces_owner_user_id_uidx');
+    expect(SCHEMA_SQL).toContain('channels_project_id_fkey');
     expect(SCHEMA_SQL).toContain(
       'INSERT INTO connections (id, workspace_id, owner_user_id, provider, credential_ref, status)',
     );
@@ -918,6 +922,71 @@ describe('capability grants', () => {
     expect(typeof allowRow?.payload.connectionId).toBe('string');
   });
 
+  it('allows a granted resource when the channel has no policy rows', async () => {
+    const store = new MemoryStore();
+    const { run } = await ownerRun(store);
+    const allowed = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: GITHUB_CREATE_ISSUE,
+      args: { repo: GITHUB_ALLOWED_REPO, title: 'Outage' },
+      run,
+    });
+    expect(allowed.ok).toBe(true);
+  });
+
+  it('intersects a broader workspace grant with a channel allow-list', async () => {
+    const store = new MemoryStore();
+    const { run, workspace } = await ownerRun(store);
+    await store.setCapabilityGrant({
+      workspaceId: workspace.id,
+      ownerUserId: workspace.ownerUserId,
+      provider: PROVIDER_GITHUB,
+      capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+      resource: 'acme/denied',
+      granted: true,
+      grantedBy: person.id,
+    });
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const app = appWith(store);
+    const saved = await app.request(`/api/channels/${defaultChannel}/policies`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        policies: [{ capability: CAPABILITY_GITHUB_ISSUES_CREATE, resource: GITHUB_ALLOWED_REPO }],
+      }),
+    });
+    expect(saved.status).toBe(200);
+    const listed = await app.request(`/api/channels/${defaultChannel}/policies`, { headers });
+    expect(listed.status).toBe(200);
+    const allowed = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: GITHUB_CREATE_ISSUE,
+      args: { repo: GITHUB_ALLOWED_REPO, title: 'Outage' },
+      run,
+    });
+    expect(allowed.ok).toBe(true);
+    const denied = await runGatewayAction({
+      store,
+      sandbox: sandbox([]),
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: GITHUB_CREATE_ISSUE,
+      args: { repo: 'acme/denied', title: 'Outage' },
+      run,
+    });
+    expect(denied.ok).toBe(false);
+    expect(denied.matched).toBe('channel-policy');
+  });
+
   it('does not revoke a slash repo when a hyphenated alias is written', async () => {
     const store = new MemoryStore();
     const { run, workspace } = await ownerRun(store);
@@ -1028,6 +1097,146 @@ describe('capability grants', () => {
       'mock-mcp',
     ]);
     expect(body.connections.every((row) => row.credentialRef.length > 0)).toBe(true);
+  });
+});
+
+describe('projects and channels', () => {
+  it('lists the default project and creates another', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const listed = await app.request('/api/projects', { headers });
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as { projects: Array<{ id: string; name: string }> };
+    expect(body.projects.some((row) => row.name === 'Default')).toBe(true);
+    const created = await app.request('/api/projects', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'Research' }),
+    });
+    expect(created.status).toBe(201);
+    const after = (await (await app.request('/api/projects', { headers })).json()) as {
+      projects: Array<{ name: string }>;
+    };
+    expect(after.projects.map((row) => row.name)).toEqual(
+      expect.arrayContaining(['Default', 'Research']),
+    );
+    const workspace = await store.getWorkspaceForUser(person.id);
+    expect(workspace?.projectId).toBe(body.projects[0]?.id);
+  });
+
+  it('creates a channel in a non-default project', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    await app.request('/api/me', { headers });
+    const workspace = await store.getWorkspaceForUser(person.id);
+    if (!workspace) {
+      throw new Error('workspace missing');
+    }
+    const project = await store.createProject({ workspaceId: workspace.id, name: 'Ops' });
+    const created = await app.request('/api/channels', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'Incidents', projectId: project.id, description: 'Oncall' }),
+    });
+    expect(created.status).toBe(201);
+    const body = (await created.json()) as {
+      channel: { description: string; id: string; name: string; projectId: string };
+    };
+    expect(body.channel).toMatchObject({
+      name: 'Incidents',
+      projectId: project.id,
+      description: 'Oncall',
+    });
+    const scope = await store.getChannelScope(body.channel.id);
+    expect(scope?.projectId).toBe(project.id);
+  });
+
+  it('rejects a project owned by another workspace', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser({ id: 'user-2', email: 'other@example.com', name: 'Other' }, []);
+    const other = await store.getWorkspaceForUser('user-2');
+    const created = await app.request('/api/channels', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'Stolen', projectId: other?.projectId }),
+    });
+    expect(created.status).toBe(404);
+  });
+
+  it('adds a bot participant and refuses a human', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const agent = await app.request('/api/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'Researcher', title: 'Researcher' }),
+    });
+    const profile = (await agent.json()) as { agent: { id: string } };
+    const added = await app.request(`/api/channels/${defaultChannel}/participants`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ agentId: profile.agent.id }),
+    });
+    expect(added.status).toBe(201);
+    const human = await app.request(`/api/channels/${defaultChannel}/participants`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ agentId: person.id }),
+    });
+    expect(human.status).toBe(403);
+    const removed = await app.request(
+      `/api/channels/${defaultChannel}/participants/${profile.agent.id}`,
+      { method: 'DELETE', headers },
+    );
+    expect(removed.status).toBe(200);
+    const roster = (await (
+      await app.request(`/api/channels/${defaultChannel}/participants`, { headers })
+    ).json()) as { participants: Array<{ principalId: string }> };
+    expect(roster.participants.some((row) => row.principalId === profile.agent.id)).toBe(false);
+  });
+
+  it('archives a channel so it is omitted from the list', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const created = await app.request('/api/channels', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'Temp' }),
+    });
+    const channel = (await created.json()) as { channel: { id: string } };
+    const archived = await app.request(`/api/channels/${channel.channel.id}/archive`, {
+      method: 'POST',
+      headers,
+    });
+    expect(archived.status).toBe(200);
+    const listed = (await (await app.request('/api/channels', { headers })).json()) as {
+      channels: Array<{ id: string; name: string }>;
+    };
+    expect(listed.channels.some((row) => row.id === channel.channel.id)).toBe(false);
+    expect(listed.channels.some((row) => row.name === 'General')).toBe(true);
+  });
+
+  it('keeps a single workspace per owner after a second upsert', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser({ id: 'user-2', email: 'other@example.com', name: 'Other' }, []);
+    const first = await store.getWorkspaceForUser(person.id);
+    const second = await store.getWorkspaceForUser('user-2');
+    expect(first?.id).not.toBe(second?.id);
+    expect(first?.ownerUserId).toBe(person.id);
+    expect(second?.ownerUserId).toBe('user-2');
+    const extra = await store.createProject({ workspaceId: first?.id ?? '', name: 'Ops' });
+    const after = await store.getWorkspaceForUser(person.id);
+    expect(after?.projectId).not.toBe(extra.id);
+    expect(after?.projectId).toBe(first?.projectId);
   });
 });
 

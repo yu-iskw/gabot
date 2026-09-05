@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS channels (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Legacy tables. Live membership is channel_participants; do not seed or query
+-- these for new features. Kept so existing migrate SQL stays idempotent.
 CREATE TABLE IF NOT EXISTS channel_memberships (
   channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -258,6 +260,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT workspaces_owner_required CHECK (owner_user_id IS NOT NULL)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS workspaces_owner_user_id_uidx ON workspaces (owner_user_id);
 
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -311,6 +314,14 @@ CREATE TABLE IF NOT EXISTS channel_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS channel_events_channel_idx ON channel_events (channel_id, created_at);
+
+CREATE TABLE IF NOT EXISTS channel_policies (
+  channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  capability TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (channel_id, capability, resource)
+);
 
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
@@ -433,6 +444,30 @@ FROM (
   ORDER BY channel_id, created_at
 ) AS first_member
 WHERE c.id = first_member.channel_id AND c.project_id IS NULL;
+
+UPDATE channels AS c
+SET project_id = p.id
+FROM channel_participants cp
+JOIN workspaces w ON w.owner_user_id = cp.principal_id AND cp.principal_type = 'user'
+JOIN projects p ON p.workspace_id = w.id AND p.id = 'proj-' || w.owner_user_id
+WHERE c.id = cp.channel_id AND c.project_id IS NULL;
+
+UPDATE channels
+SET project_id = (
+  SELECT p.id FROM projects p ORDER BY p.created_at, p.id LIMIT 1
+)
+WHERE project_id IS NULL AND EXISTS (SELECT 1 FROM projects);
+
+ALTER TABLE channels ALTER COLUMN project_id SET NOT NULL;
+
+DO $$
+BEGIN
+  ALTER TABLE channels
+    ADD CONSTRAINT channels_project_id_fkey
+    FOREIGN KEY (project_id) REFERENCES projects(id);
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 `;
 
 export const SEED_SQL = `

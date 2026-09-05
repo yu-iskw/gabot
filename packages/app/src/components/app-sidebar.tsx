@@ -17,6 +17,7 @@ import { useState } from 'react';
 import { apiJson } from '../api.js';
 import { useAuth } from '../lib/auth-context.js';
 import { matchingChannels } from '../lib/channel-search.js';
+import { groupChannelsByProject } from '../lib/project-channels.js';
 import { useSidebar } from '../lib/sidebar-context.js';
 import { cn } from '../lib/utils.js';
 
@@ -26,7 +27,8 @@ import { Input } from './ui/input.js';
 
 import type { ReactNode } from 'react';
 
-type Channel = { id: string; name: string; lastMessage: string | null };
+type Channel = { id: string; lastMessage: string | null; name: string; projectId: string };
+type Project = { id: string; name: string };
 
 export function AppSidebar() {
   const { auth, token, user } = useAuth();
@@ -39,7 +41,15 @@ export function AppSidebar() {
       return body.channels;
     },
   });
+  const projects = useQuery({
+    queryKey: ['projects'],
+    queryFn: async () => {
+      const body = await apiJson<{ projects: Project[] }>('/api/projects', await token());
+      return body.projects;
+    },
+  });
   const visible = matchingChannels(channels.data, search);
+  const groups = groupChannelsByProject(visible, projects.data ?? []);
   const searching = search.trim().length > 0;
 
   return (
@@ -87,23 +97,30 @@ export function AppSidebar() {
                 No channels match your search
               </p>
             ) : null}
-            {visible.map((channel) => (
-              <Link
-                key={channel.id}
-                to="/channel/$channelId"
-                params={{ channelId: channel.id }}
-                search={{}}
-                data-testid={channel.name === 'General' ? 'channel-general' : undefined}
-                className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-sidebar-accent"
-              >
-                <ChannelAvatar name={channel.name} size={32} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{channel.name}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {channel.lastMessage ?? 'No messages yet'}
-                  </span>
-                </span>
-              </Link>
+            {groups.map((group) => (
+              <div key={group.project.id} className="mb-3">
+                <p className="px-2 py-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                  {group.project.name}
+                </p>
+                {group.channels.map((channel) => (
+                  <Link
+                    key={channel.id}
+                    to="/channel/$channelId"
+                    params={{ channelId: channel.id }}
+                    search={{}}
+                    data-testid={channel.name === 'General' ? 'channel-general' : undefined}
+                    className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-sidebar-accent"
+                  >
+                    <ChannelAvatar name={channel.name} size={32} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{channel.name}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {channel.lastMessage ?? 'No messages yet'}
+                      </span>
+                    </span>
+                  </Link>
+                ))}
+              </div>
             ))}
           </nav>
           <div className="mt-auto flex flex-col gap-px border-t border-sidebar-border pt-2">

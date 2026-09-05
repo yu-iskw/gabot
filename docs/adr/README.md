@@ -14,3 +14,4 @@ Numbered records for gabot. Start at [0001](0001-record-architecture-decisions.m
 - [0010. Delegation can only attenuate authority](0010-delegation-attenuates-authority.md)
 - [0011. Bots hold no downstream credentials](0011-bots-hold-no-downstream-credentials.md)
 - [0012. Catalog, connect, grant, and invoke are separate](0012-catalog-connect-grant-invoke.md)
+- [0013. Live channel model is participants and project](0013-live-channel-model-participants-and-project.md)
