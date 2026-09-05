@@ -12,7 +12,6 @@ export function groupChannelsByProject<T extends { projectId: string }>(
   channels: T[],
   projects: NamedProject[],
 ): Array<ProjectChannelGroup<T>> {
-  const names = new Map(projects.map((project) => [project.id, project.name]));
   const groups = new Map<string, ProjectChannelGroup<T>>();
   for (const project of projects) {
     groups.set(project.id, { project, channels: [] });
@@ -24,7 +23,7 @@ export function groupChannelsByProject<T extends { projectId: string }>(
       continue;
     }
     groups.set(channel.projectId, {
-      project: { id: channel.projectId, name: names.get(channel.projectId) ?? 'Project' },
+      project: { id: channel.projectId, name: 'Project' },
       channels: [channel],
     });
   }

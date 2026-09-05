@@ -253,9 +253,10 @@ async function authorizeCapability(
     });
     return { ok: false, result: { ok: false, reason: message, matched: 'grant', output: message } };
   }
-  const [connections, grants] = await Promise.all([
+  const [connections, grants, policies] = await Promise.all([
     input.store.listOwnerConnections(input.run.workspaceId),
     input.store.listCapabilityGrants(input.run.workspaceId),
+    input.store.listChannelPolicies(input.run.channelId),
   ]);
   const match = matchCapabilityGrant({
     workspaceId: input.run.workspaceId,
@@ -277,7 +278,6 @@ async function authorizeCapability(
       result: { ok: false, reason: match.reason, matched: 'grant', output: match.reason },
     };
   }
-  const policies = await input.store.listChannelPolicies(input.run.channelId);
   const policy = matchChannelPolicy({
     channelId: input.run.channelId,
     capability,

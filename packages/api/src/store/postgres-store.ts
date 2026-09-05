@@ -429,6 +429,16 @@ export class PostgresStore implements GabotStore {
     `;
   }
 
+  public async getAgent(id: string): Promise<AgentProfile | null> {
+    const rows = await this.sql<AgentProfile[]>`
+      SELECT a.id, a.name, p.title, p.role_description AS "roleDescription", p.visibility
+      FROM agents a
+      JOIN agent_profiles p ON p.agent_id = a.id
+      WHERE a.id = ${id}
+    `;
+    return rows.at(0) ?? null;
+  }
+
   public async createAgent(input: {
     name: string;
     title: string;
@@ -786,12 +796,18 @@ export class PostgresStore implements GabotStore {
     const unique = uniquePolicies(channelId, policies);
     await this.sql.begin(async (sql) => {
       await sql`DELETE FROM channel_policies WHERE channel_id = ${channelId}`;
-      for (const policy of unique) {
-        await sql`
-          INSERT INTO channel_policies (channel_id, capability, resource)
-          VALUES (${policy.channelId}, ${policy.capability}, ${policy.resource})
-        `;
+      if (unique.length === 0) {
+        return;
       }
+      await sql`
+        INSERT INTO channel_policies ${sql(
+          unique.map((policy) => ({
+            channel_id: policy.channelId,
+            capability: policy.capability,
+            resource: policy.resource,
+          })),
+        )}
+      `;
     });
     return unique;
   }
@@ -1017,14 +1033,21 @@ export class PostgresStore implements GabotStore {
         VALUES (${projectId}, ${workspaceId}, ${DEFAULT_PROJECT_NAME})
         ON CONFLICT (id) DO NOTHING
       `;
-      await sql`
+      const createdChannel = await sql<{ id: string }[]>`
         INSERT INTO channels (id, name, description, project_id)
         VALUES (${channelId}, ${DEFAULT_CHANNEL_NAME}, 'Default coworker channel', ${projectId})
         ON CONFLICT (id) DO NOTHING
+        RETURNING id
       `;
       await Promise.all([
         this.retireSharedGeneral(sql, user.id),
-        this.attachChannelParties(sql, channelId, user.id),
+        createdChannel.length > 0
+          ? this.attachChannelParties(sql, channelId, user.id)
+          : sql`
+              INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+              VALUES (${channelId}, 'user', ${user.id}, 'owner')
+              ON CONFLICT DO NOTHING
+            `,
         insertDefaultOwnerConnections(sql, workspaceId, user.id, created.length > 0),
       ]);
     });

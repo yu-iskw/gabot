@@ -3,6 +3,7 @@ import {
   type ActionPolicy,
   type AuthorityEnvelope,
   type CapabilityGrant,
+  type ChannelPolicy,
   type OwnerConnection,
   type VerifiedPerson,
 } from '@gabot/common';
@@ -21,11 +22,7 @@ export type ProjectRecord = {
   workspaceId: string;
 };
 
-export type ChannelPolicyRecord = {
-  capability: string;
-  channelId: string;
-  resource: string;
-};
+export type ChannelPolicyRecord = ChannelPolicy;
 
 export type ChannelPatch = {
   description?: string;
@@ -267,6 +264,7 @@ export type GabotStore = {
   listPeople(): Promise<SessionUser[]>;
   listPlugins(): Promise<PluginRecord[]>;
   listAgents(): Promise<AgentProfile[]>;
+  getAgent(id: string): Promise<AgentProfile | null>;
   createAgent(input: {
     name: string;
     title: string;

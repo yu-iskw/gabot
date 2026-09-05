@@ -10,6 +10,7 @@ import { Input } from '../components/ui/input.js';
 import { useAuth } from '../lib/auth-context.js';
 
 import type { Coworker } from '../lib/agents.js';
+import type { NamedProject } from '../lib/project-channels.js';
 import type { QueryClient } from '@tanstack/react-query';
 
 export function HomePage() {
@@ -29,10 +30,7 @@ export function HomePage() {
   const projects = useQuery({
     queryKey: ['projects'],
     queryFn: async () => {
-      const body = await apiJson<{ projects: Array<{ id: string; name: string }> }>(
-        '/api/projects',
-        await token(),
-      );
+      const body = await apiJson<{ projects: NamedProject[] }>('/api/projects', await token());
       return body.projects;
     },
   });

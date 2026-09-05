@@ -5,6 +5,7 @@ import {
   COMPUTER_SCREENSHOT,
   matchesToken,
   mcpCapabilityForRef,
+  personalChannelId,
   PROVIDER_MOCK_MCP,
 } from '@gabot/common';
 import { Hono } from 'hono';
@@ -54,6 +55,7 @@ const UNAUTHORIZED = 'Unauthorized';
 const INVALID_BODY = 'Invalid body';
 const FORBIDDEN = 'Forbidden';
 const HUMANS_FORBIDDEN = 'Cannot add humans as channel participants';
+const DEFAULT_CHANNEL_LOCKED = 'Cannot archive the default channel';
 const WORKER_SECRET_HEADER = 'x-gabot-worker-secret';
 
 export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariables }> {
@@ -211,6 +213,9 @@ function registerChannelMutationRoutes(
     if (!owned.ok) {
       return context.json(owned.body, owned.status);
     }
+    if (owned.channel.id === personalChannelId(context.get('user').id)) {
+      return context.json({ error: DEFAULT_CHANNEL_LOCKED }, 400);
+    }
     await options.store.archiveChannel(owned.channel.id);
     return context.json({ ok: true });
   });
@@ -304,22 +309,25 @@ function registerChannelMutationRoutes(
 
 function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options: ApiOptions): void {
   app.get(API_PROJECTS, async (context) => {
-    const workspace = await options.store.getWorkspaceForUser(context.get('user').id);
-    if (!workspace) {
-      return context.json({ error: NOT_FOUND }, 404);
+    const access = await requireWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
     }
-    return context.json({ projects: await options.store.listProjects(workspace.id) });
+    return context.json({ projects: await options.store.listProjects(access.workspace.id) });
   });
   app.post(API_PROJECTS, async (context) => {
-    const workspace = await options.store.getWorkspaceForUser(context.get('user').id);
-    if (!workspace) {
-      return context.json({ error: NOT_FOUND }, 404);
+    const access = await requireWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
     }
     const name = asString(asRecord(await context.req.json()).name);
     if (!name) {
       return context.json({ error: 'name is required' }, 400);
     }
-    const project = await options.store.createProject({ workspaceId: workspace.id, name });
+    const project = await options.store.createProject({
+      workspaceId: access.workspace.id,
+      name,
+    });
     return context.json({ project }, 201);
   });
   app.get(API_AGENTS, async (context) => {
@@ -564,6 +572,20 @@ async function writePluginGrant(
   });
 }
 
+async function requireWorkspace(
+  store: GabotStore,
+  user: SessionUser,
+): Promise<
+  | { ok: true; workspace: WorkspaceRecord }
+  | { body: Record<string, unknown>; ok: false; status: 404 }
+> {
+  const workspace = await store.getWorkspaceForUser(user.id);
+  if (!workspace) {
+    return { ok: false, status: 404, body: { error: NOT_FOUND } };
+  }
+  return { ok: true, workspace };
+}
+
 async function requireAdminWorkspace(
   store: GabotStore,
   user: SessionUser,
@@ -574,11 +596,7 @@ async function requireAdminWorkspace(
   if (!user.isAdmin) {
     return { ok: false, status: 403, body: { error: FORBIDDEN } };
   }
-  const workspace = await store.getWorkspaceForUser(user.id);
-  if (!workspace) {
-    return { ok: false, status: 404, body: { error: NOT_FOUND } };
-  }
-  return { ok: true, workspace };
+  return requireWorkspace(store, user);
 }
 
 async function persistCapabilityGrant(
@@ -806,15 +824,14 @@ async function botParticipantOrError(
   store: GabotStore,
   agentId: string,
 ): Promise<{ body: Record<string, unknown>; ok: false; status: 403 | 404 } | { ok: true }> {
-  const [person, agents] = await Promise.all([store.getUser(agentId), store.listAgents()]);
-  const agent = agents.find((row) => row.id === agentId);
-  if (person && !agent) {
+  const [agent, people] = await Promise.all([store.getAgent(agentId), store.listPeople()]);
+  if (agent) {
+    return { ok: true };
+  }
+  if (people.some((row) => row.id === agentId)) {
     return { ok: false, status: 403, body: { error: HUMANS_FORBIDDEN } };
   }
-  if (!agent) {
-    return { ok: false, status: 404, body: { error: NOT_FOUND } };
-  }
-  return { ok: true };
+  return { ok: false, status: 404, body: { error: NOT_FOUND } };
 }
 
 function readChannelPolicies(

@@ -17,6 +17,7 @@ import { Button } from './components/ui/button.js';
 import { useAuth } from './lib/auth-context.js';
 
 import type { ChannelPane } from './lib/channel-pane.js';
+import type { NamedProject } from './lib/project-channels.js';
 import type { ReactNode } from 'react';
 
 const DEFAULT_BOT = 'general-assistant';
@@ -45,10 +46,7 @@ export function ChannelPage({
   const projects = useQuery({
     queryKey: ['projects'],
     queryFn: async () => {
-      const body = await apiJson<{ projects: Array<{ id: string; name: string }> }>(
-        '/api/projects',
-        await token(),
-      );
+      const body = await apiJson<{ projects: NamedProject[] }>('/api/projects', await token());
       return body.projects;
     },
   });
@@ -157,7 +155,7 @@ function paneDetail(
 ) {
   switch (pane) {
     case 'settings': {
-      return <ChannelSettings botId={botId} channelId={channelId} />;
+      return <ChannelSettings botId={botId} channelId={channelId} name={channelName} />;
     }
     case 'watch': {
       return <ComputerPanel botId={botId} name={channelName} />;
@@ -172,7 +170,15 @@ function paneDetail(
   }
 }
 
-function ChannelSettings({ botId, channelId }: { botId: string; channelId: string }) {
+function ChannelSettings({
+  botId,
+  channelId,
+  name,
+}: {
+  botId: string;
+  channelId: string;
+  name: string;
+}) {
   const { token } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -188,14 +194,16 @@ function ChannelSettings({ botId, channelId }: { botId: string; channelId: strin
     <div className="flex w-full flex-col gap-6 p-6">
       <ChannelRoster channelId={channelId} />
       <ChannelPolicies channelId={channelId} />
-      <Button
-        data-testid="archive-channel"
-        disabled={archive.isPending}
-        variant="outline"
-        onClick={() => archive.mutate()}
-      >
-        Archive channel
-      </Button>
+      {name === 'General' ? null : (
+        <Button
+          data-testid="archive-channel"
+          disabled={archive.isPending}
+          variant="outline"
+          onClick={() => archive.mutate()}
+        >
+          Archive channel
+        </Button>
+      )}
       <AgentProfile agentId={botId} />
     </div>
   );

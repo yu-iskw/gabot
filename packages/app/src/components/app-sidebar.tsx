@@ -25,10 +25,10 @@ import { ChannelAvatar } from './channels/channel-avatar.js';
 import { Button } from './ui/button.js';
 import { Input } from './ui/input.js';
 
+import type { NamedProject } from '../lib/project-channels.js';
 import type { ReactNode } from 'react';
 
 type Channel = { id: string; lastMessage: string | null; name: string; projectId: string };
-type Project = { id: string; name: string };
 
 export function AppSidebar() {
   const { auth, token, user } = useAuth();
@@ -44,7 +44,7 @@ export function AppSidebar() {
   const projects = useQuery({
     queryKey: ['projects'],
     queryFn: async () => {
-      const body = await apiJson<{ projects: Project[] }>('/api/projects', await token());
+      const body = await apiJson<{ projects: NamedProject[] }>('/api/projects', await token());
       return body.projects;
     },
   });

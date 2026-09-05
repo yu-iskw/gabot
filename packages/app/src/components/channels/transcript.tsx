@@ -16,13 +16,13 @@ import { ToolLine } from './tool-line.js';
 type TranscriptMessage = {
   agentId?: string | null;
   content: string;
-  createdAt?: Date | string;
+  createdAt: string;
   id: string;
   role: string;
 };
 
 type ChannelEvent = {
-  createdAt?: Date | string;
+  createdAt: string;
   id: string;
   payload: Record<string, unknown>;
   type: string;

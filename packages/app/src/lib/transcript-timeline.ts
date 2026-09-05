@@ -1,5 +1,5 @@
 export type TimedItem = {
-  createdAt?: Date | string;
+  createdAt: string;
   id: string;
 };
 
@@ -37,13 +37,7 @@ export function interleaveTranscript<TMessage extends TimedItem, TEvent extends 
   });
 }
 
-function timeMs(value: Date | string | undefined): number {
-  if (value instanceof Date) {
-    return value.getTime();
-  }
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? 0 : parsed;
-  }
-  return 0;
+function timeMs(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
 }

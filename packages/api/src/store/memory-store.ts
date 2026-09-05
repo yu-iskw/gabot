@@ -395,6 +395,11 @@ export class MemoryStore implements GabotStore {
     return [...this.agents];
   }
 
+  public async getAgent(id: string): Promise<AgentProfile | null> {
+    const profile = this.agents.find((row) => row.id === id);
+    return profile ? { ...profile } : null;
+  }
+
   public async createAgent(input: {
     name: string;
     title: string;
@@ -916,8 +921,15 @@ export class MemoryStore implements GabotStore {
         projectId,
         deletedAt: null,
       });
+      this.attachChannelParties(channelId, user.id);
+    } else {
+      this.rememberParticipant({
+        channelId,
+        principalType: 'user',
+        principalId: user.id,
+        role: 'owner',
+      });
     }
-    this.attachChannelParties(channelId, user.id);
     this.seedOwnerConnections(workspaceId, user.id, createdWorkspace);
   }
 

@@ -1223,6 +1223,38 @@ describe('projects and channels', () => {
     expect(listed.channels.some((row) => row.name === 'General')).toBe(true);
   });
 
+  it('does not restore a removed default bot after upsertUser or getUser', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const removed = await app.request(`/api/channels/${defaultChannel}/participants/coder`, {
+      method: 'DELETE',
+      headers,
+    });
+    expect(removed.status).toBe(200);
+    await store.upsertUser(person, ['admin@example.com']);
+    await store.getUser(person.id);
+    const roster = (await (
+      await app.request(`/api/channels/${defaultChannel}/participants`, { headers })
+    ).json()) as { participants: Array<{ principalId: string }> };
+    expect(roster.participants.some((row) => row.principalId === 'coder')).toBe(false);
+  });
+
+  it('refuses to archive the default General channel', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const archived = await app.request(`/api/channels/${defaultChannel}/archive`, {
+      method: 'POST',
+      headers,
+    });
+    expect(archived.status).toBe(400);
+    const listed = (await (await app.request('/api/channels', { headers })).json()) as {
+      channels: Array<{ name: string }>;
+    };
+    expect(listed.channels.some((row) => row.name === 'General')).toBe(true);
+  });
+
   it('keeps a single workspace per owner after a second upsert', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, ['admin@example.com']);
