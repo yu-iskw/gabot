@@ -1,6 +1,5 @@
 import {
   IconBuildingBank,
-  IconDeviceDesktop,
   IconFileText,
   IconKey,
   IconListDetails,
@@ -26,12 +25,6 @@ const REACH = [
     title: 'Boundaries',
     description: 'Rules that decide what a Bot may never do.',
     icon: <IconShieldCheck className="size-4" />,
-  },
-  {
-    to: '/admin/computers',
-    title: 'Computers',
-    description: 'The machines Bots run their tools on.',
-    icon: <IconDeviceDesktop className="size-4" />,
   },
 ] as const;
 

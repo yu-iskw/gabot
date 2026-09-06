@@ -4,14 +4,13 @@ This repository is testable with Docker Compose. Live GCP is not required for `p
 
 ## Resource types
 
-| Compose service       | Cloud Run resource          | Flags                                                                                                   |
-| --------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `api`                 | **Service**                 | Plain service. **Do not** set `--functional-type`. The gateway is not an agent; the flag is immutable.  |
-| `agent`               | **Service**                 | `--functional-type=agent --identity-type=agent-identity`                                                |
-| `mcp-mock` / real MCP | **Service**                 | `--functional-type=mcp-server`                                                                          |
-| `computer`            | **Instance**                | `--sandbox-launcher` for untrusted shell. Agent Platform identity flags **cannot** be set on instances. |
-| `jobs` / `migrate`    | **Job**                     | `gcloud beta run jobs execute` for migrate, cull, routine sweep, handoff.                               |
-| `app`                 | Service or Firebase Hosting | Later.                                                                                                  |
+| Compose service       | Cloud Run resource          | Flags                                                                                                  |
+| --------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `api`                 | **Service**                 | Plain service. **Do not** set `--functional-type`. The gateway is not an agent; the flag is immutable. |
+| `agent`               | **Service**                 | `--functional-type=agent --identity-type=agent-identity`                                               |
+| `mcp-mock` / real MCP | **Service**                 | `--functional-type=mcp-server`                                                                         |
+| `jobs` / `migrate`    | **Job**                     | `gcloud beta run jobs execute` for migrate, cull, routine sweep, handoff.                              |
+| `app`                 | Service or Firebase Hosting | Later.                                                                                                 |
 
 `--functional-type` cannot be changed after the first deploy. A mistaken `agent` type on `gabot-api` cannot be unset.
 
@@ -30,10 +29,6 @@ Registry: production introspects `/.well-known/agent-card.json`. Compose uses `R
 AlloyDB (production) / AlloyDB Omni or `pgvector/pgvector:pg17` (Compose). Direct VPC egress from Cloud Run to AlloyDB. Threads live in AlloyDB (`threads`, `messages`), not CopilotKit Intelligence or Vertex Sessions.
 
 Mastra `PostgresStore` uses the same instance (`mastra_threads` / `mastra_messages`). Mastra A2A task resume is in-memory and is **not** the handoff log; hops use `work_items`.
-
-## Computers
-
-One Cloud Run instance per bot. If Chromium-on-gVisor fails, escalate to GKE sandboxes (same isolation rule: computers must not reach AlloyDB).
 
 Example:
 

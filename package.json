@@ -2,7 +2,7 @@
   "name": "gabot",
   "version": "1.0.0",
   "private": true,
-  "description": "Google Cloud coworker platform: governed agents, computers, and MCP without CopilotKit.",
+  "description": "Google Cloud coworker platform: governed agents and MCP without CopilotKit.",
   "keywords": [],
   "license": "Apache-2.0",
   "author": "",

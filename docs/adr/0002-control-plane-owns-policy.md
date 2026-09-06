@@ -8,20 +8,20 @@ Accepted
 
 ## Context
 
-OpenBot's product is a fail-closed gateway: every computer, file, shell, MCP, and
+OpenBot's product is a fail-closed gateway: every file, shell, MCP, and
 component call is decided and recorded before it happens. Mastra agents and remote
 AG-UI bots must not reach those surfaces directly.
 
 ## Decision
 
-`packages/api` is the only process allowed to call computers, MCP servers, and the
+`packages/api` is the only process allowed to call MCP servers and the
 credential vault. Agents receive tool _descriptions_ and emit AG-UI tool calls. The
 API evaluates CEL policy, writes an audit row, then forwards or refuses.
 
-Agents never hold `COMPUTER_TOKEN` or database credentials for product tables.
+Agents never hold database credentials for product tables.
 
 ## Consequences
 
-A compromised coworker container cannot skip the boundary. Compose puts the computer
-on a network that cannot reach AlloyDB Omni. Cloud Run should keep the same split:
-the API service is not `--functional-type=agent`.
+A compromised coworker container cannot skip the boundary. Compose keeps
+untrusted runtimes off the AlloyDB Omni network. Cloud Run should keep the same
+split: the API service is not `--functional-type=agent`.

@@ -172,6 +172,22 @@ describe('control plane', () => {
     expect(row?.payload.rule).toContain('example.com');
   });
 
+  it('reads and writes action policy on the admin route', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const listed = await app.request('/api/admin/action-policy', { headers });
+    expect(listed.status).toBe(200);
+    const saved = await app.request('/api/admin/action-policy', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ mode: 'enforce', deny: ['true'], allow: ['true'] }),
+    });
+    expect(saved.status).toBe(200);
+    const body = (await saved.json()) as { policy: { deny: string[] } };
+    expect(body.policy.deny).toEqual(['true']);
+  });
+
   it('streams a scripted navigate turn', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, ['admin@example.com']);

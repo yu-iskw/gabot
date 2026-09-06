@@ -1,4 +1,4 @@
-import { IconDeviceDesktop, IconSettings } from '@tabler/icons-react';
+import { IconSettings } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -10,7 +10,6 @@ import { ChannelPolicies } from './components/channels/channel-policies.js';
 import { ChannelRoster } from './components/channels/channel-roster.js';
 import { Composer } from './components/channels/composer.js';
 import { Transcript } from './components/channels/transcript.js';
-import { ComputerPanel } from './components/computer/computer-panel.js';
 import { DetailPanel } from './components/layout/detail-panel.js';
 import { SidebarToggle } from './components/layout/sidebar-toggle.js';
 import { Button } from './components/ui/button.js';
@@ -105,7 +104,6 @@ export function ChannelPage({
         queryClient.invalidateQueries({ queryKey: ['participants'] }),
         queryClient.invalidateQueries({ queryKey: ['audit'] }),
         queryClient.invalidateQueries({ queryKey: ['channels'] }),
-        queryClient.invalidateQueries({ queryKey: ['screenshot'] }),
         queryClient.invalidateQueries({ queryKey: ['agents'] }),
         queryClient.invalidateQueries({ queryKey: ['routines'] }),
       ]);
@@ -115,7 +113,7 @@ export function ChannelPage({
   return (
     <DetailPanel
       open={pane !== null}
-      detail={paneDetail(pane, channelId, channelName, watchBotId(messages.data ?? []))}
+      detail={paneDetail(pane, channelId, watchBotId(messages.data ?? []))}
       onClose={() => onPane(null)}
     >
       <ChannelHeader name={channelName} pane={pane} projectName={projectName} onPane={onPane} />
@@ -148,18 +146,10 @@ function watchBotId(messages: Array<{ agentId: string | null; role: string }>): 
   return last?.agentId ?? DEFAULT_BOT;
 }
 
-function paneDetail(
-  pane: ChannelPane | null,
-  channelId: string,
-  channelName: string,
-  botId: string,
-) {
+function paneDetail(pane: ChannelPane | null, channelId: string, botId: string) {
   switch (pane) {
     case 'settings': {
       return <ChannelSettings botId={botId} channelId={channelId} />;
-    }
-    case 'watch': {
-      return <ComputerPanel botId={botId} name={channelName} />;
     }
     case null: {
       return null;
@@ -214,7 +204,6 @@ function ChannelHeader({
   pane: ChannelPane | null;
   projectName?: string;
 }) {
-  const watching = pane === 'watch';
   const settings = pane === 'settings';
   return (
     <header className="sticky top-0 flex h-12 items-center justify-between gap-2 border-b border-border px-3">
@@ -229,13 +218,6 @@ function ChannelHeader({
         </div>
       </div>
       <div className="flex flex-row gap-1.5">
-        <PaneToggle
-          active={watching}
-          label="Watch this Bot's screen"
-          onClick={() => onPane(watching ? null : 'watch')}
-        >
-          <IconDeviceDesktop className="size-4.5" />
-        </PaneToggle>
         <PaneToggle
           active={settings}
           label="Channel coworker"

@@ -39,11 +39,6 @@ test('snapshots OpenBot-equivalent screens and use cases', async ({ page }) => {
   await openGeneral(page);
   await shot(page, dir, '03-channel-empty.png');
 
-  await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
-  await expect(page.getByTestId('computer-view')).toBeVisible();
-  await shot(page, dir, '25-channel-watch-empty.png');
-
-  await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
   await page.getByRole('button', { name: 'Channel coworker' }).click();
   await expect(page.getByTestId('agent-profile')).toBeVisible();
   await shot(page, dir, '27-channel-settings-url.png');
@@ -67,18 +62,11 @@ test('snapshots OpenBot-equivalent screens and use cases', async ({ page }) => {
   await expect(page.getByText('say hello').first()).toBeVisible();
   await shot(page, dir, '07-routines-after-schedule.png');
 
-  await page.getByTestId('channel-general').click();
-  await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
-  await sendPrompt(page, 'please navigate to example.com', /example.com/i);
-  await expect(page.getByTestId('audit-events')).toContainText('Opened');
-  await shot(page, dir, '08-channel-computer.png');
-
   const rest: Array<[string, string]> = [
     ['/skills', '09-skills.png'],
     ['/admin', '10-admin.png'],
     ['/admin/audit', '11-admin-audit.png'],
     ['/admin/boundaries', '12-admin-boundaries.png'],
-    ['/admin/computers', '13-admin-computers.png'],
     ['/admin/plugins', '14-admin-plugins.png'],
     ['/admin/people', '15-admin-people.png'],
     ['/admin/credentials', '16-admin-credentials.png'],
@@ -117,8 +105,8 @@ test('snapshots OpenBot-equivalent screens and use cases', async ({ page }) => {
   await expect(page.getByTestId('agent-profile')).toBeVisible();
   await shot(page, dir, '23-channel-settings.png');
 
-  await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
+  await page.getByRole('button', { name: 'Channel coworker' }).click();
   await sendPrompt(page, 'please echo hello via mcp', /grant|refus/i);
-  await expect(page.getByTestId('audit-events')).toContainText('Blocked');
+  await expect(page.getByTestId('messages')).toContainText('Blocked');
   await shot(page, dir, '24-mcp-refused.png');
 });

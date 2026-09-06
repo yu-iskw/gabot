@@ -4,20 +4,19 @@ import { paneFromSearch, readChannelSearch, searchForPane, searchRecord } from '
 
 describe('readChannelSearch', () => {
   it('treats boolean or string true as open', () => {
-    expect(readChannelSearch({ watch: true, settings: 'true' })).toEqual({
+    expect(readChannelSearch({ settings: 'true' })).toEqual({
       settings: true,
-      watch: true,
     });
   });
 
   it('omits flags that are off', () => {
-    expect(readChannelSearch({ watch: 'false', settings: false })).toEqual({});
+    expect(readChannelSearch({ settings: false })).toEqual({});
   });
 });
 
 describe('paneFromSearch', () => {
-  it('prefers watch when both flags are set', () => {
-    expect(paneFromSearch({ settings: true, watch: true })).toBe('watch');
+  it('opens settings when the flag is set', () => {
+    expect(paneFromSearch({ settings: true })).toBe('settings');
   });
 
   it('returns null when the pane is closed', () => {
@@ -26,16 +25,15 @@ describe('paneFromSearch', () => {
 });
 
 describe('searchForPane', () => {
-  it('opens one flag and clears the other', () => {
+  it('opens settings or clears the pane', () => {
     expect(searchForPane('settings')).toEqual({ settings: true });
-    expect(searchForPane('watch')).toEqual({ watch: true });
     expect(searchForPane(null)).toEqual({});
   });
 });
 
 describe('searchRecord', () => {
   it('reads an object and ignores other values', () => {
-    expect(searchRecord({ watch: true })).toEqual({ watch: true });
+    expect(searchRecord({ settings: true })).toEqual({ settings: true });
     expect(searchRecord(null)).toEqual({});
   });
 });

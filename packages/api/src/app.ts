@@ -180,6 +180,18 @@ function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options:
       }),
     });
   });
+  app.get('/api/admin/action-policy', async (context) => {
+    return context.json({ policy: await options.store.getPolicy() });
+  });
+  app.put('/api/admin/action-policy', async (context) => {
+    const user = context.get('user');
+    if (!user.isAdmin) {
+      return context.json({ error: FORBIDDEN }, 403);
+    }
+    const policy = readPolicy(await context.req.json());
+    await options.store.setPolicy(policy, user.id);
+    return context.json({ policy });
+  });
 }
 
 function registerChannelMutationRoutes(

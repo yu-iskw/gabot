@@ -11,12 +11,13 @@ Supersedes [0006](0006-computers-and-functional-type.md).
 ## Context
 
 ADR 0006 put Chromium on a computer service and froze Cloud Run functional
-types. The prototype still requires `COMPUTER_URL` / `COMPUTER_TOKEN`, ships
-`packages/computer` and `packages/supervisor`, and exposes watch and admin
+types. The prototype required `COMPUTER_URL` / `COMPUTER_TOKEN`, shipped
+`packages/computer` and `packages/supervisor`, and exposed watch and admin
 computer UI. A shared browser is a tenancy leak. Issues #2 and #3 remove
 built-in computer use from the product (AC-21).
 
-This record is the product decision. It does not delete those packages.
+This record is the product decision. The #7 deletion slice has removed those
+packages and the `COMPUTER_*` boot requirement.
 
 ## Decision
 
@@ -26,12 +27,11 @@ offer computer use. That service is a separate project. It is not a launch
 dependency and is not implemented here. Workspaces admit it only through the
 catalog contract in [ADR 0014](0014-enterprise-workspace-contracts.md).
 
-Removing routes, packages, Compose dependencies, and UI is remaining work on
-issue #7, not this contracts slice.
+Do not add computer MCP to gabot.
 
 ## Consequences
 
-Do not add computer MCP to gabot. Do not treat Compose `depends_on: computer`
-as target architecture. Prototype computer code stays until the deletion slice
-of #7. Functional-type flags for Mastra and MCP services in 0006 remain
-relevant only where those services still exist.
+Packages and `COMPUTER_*` boot have been removed by the #7 deletion slice. Do
+not add computer MCP to gabot. Do not treat Compose `depends_on: computer` as
+target architecture. Functional-type flags for Mastra and MCP services in 0006
+remain relevant only where those services still exist.
