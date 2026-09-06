@@ -53,14 +53,22 @@ export function createHttpAgentRunner(agentUrl: string): AgentRunner {
   };
 }
 
-type TurnInput = {
+type TurnDeps = {
   agent: AgentRunner;
-  botId?: string;
-  channelId: string;
   mcpUrl: string;
-  message: string;
   store: GabotStore;
   user: SessionUser;
+};
+
+type TurnInput = TurnDeps & {
+  botId?: string;
+  channelId: string;
+  message: string;
+};
+
+type ExecuteRunInput = TurnDeps & {
+  run?: RunRecord;
+  runId: string;
 };
 
 export type TurnResult = {
@@ -159,14 +167,7 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
   });
 }
 
-export async function executeRun(input: {
-  agent: AgentRunner;
-  mcpUrl: string;
-  run?: RunRecord;
-  runId: string;
-  store: GabotStore;
-  user: SessionUser;
-}): Promise<TurnResult> {
+export async function executeRun(input: ExecuteRunInput): Promise<TurnResult> {
   const run = input.run ?? (await input.store.getRun(input.runId));
   if (!run) {
     throw new Error(`Run ${input.runId} not found.`);
@@ -191,15 +192,7 @@ export async function executeRun(input: {
   }
 }
 
-async function completeRun(
-  input: {
-    agent: AgentRunner;
-    mcpUrl: string;
-    store: GabotStore;
-    user: SessionUser;
-  },
-  run: RunRecord,
-): Promise<TurnResult> {
+async function completeRun(input: TurnDeps, run: RunRecord): Promise<TurnResult> {
   const [threadId, seeded] = await Promise.all([
     input.store.mintThread(run.ownerUserId, run.channelId),
     messagesForRun(input.store, run),
@@ -271,12 +264,7 @@ async function messagesForRun(
 }
 
 async function applyToolCalls(
-  input: {
-    agent: AgentRunner;
-    mcpUrl: string;
-    store: GabotStore;
-    user: SessionUser;
-  },
+  input: TurnDeps,
   run: RunRecord,
   messages: AguiRunInput['messages'],
   calls: AguiToolCall[],

@@ -6,6 +6,7 @@ import {
   GITHUB_ALLOWED_REPO,
   GITHUB_CREATE_ISSUE,
   matchesToken,
+  MCP_ECHO,
   personalChannelId,
   PROVIDER_GITHUB,
   PROVIDER_MOCK_MCP,
@@ -45,6 +46,15 @@ function appWith(store: MemoryStore) {
     workerSecret: 'worker',
     adminEmails: ['admin@example.com'],
   });
+}
+
+function scriptedDeps(store: MemoryStore) {
+  return {
+    store,
+    agent: createScriptedAgentRunner(),
+    mcpUrl: 'http://mcp.test',
+    user: { ...person, isAdmin: true },
+  };
 }
 
 async function ownerRun(store: MemoryStore) {
@@ -162,7 +172,7 @@ describe('control plane', () => {
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
-      toolName: 'mcp__mock__echo',
+      toolName: MCP_ECHO,
       args: { text: 'hello' },
     });
     expect(refused.ok).toBe(false);
@@ -195,7 +205,7 @@ describe('control plane', () => {
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
-      toolName: 'mcp__mock__echo',
+      toolName: MCP_ECHO,
       args: { text: 'hello' },
     });
     expect(result.ok).toBe(false);
@@ -561,12 +571,7 @@ describe('turns and runs', () => {
   it('delegates monitor to triage to coder through durable child runs', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, ['admin@example.com']);
-    const deps = {
-      store,
-      agent: createScriptedAgentRunner(),
-      mcpUrl: 'http://mcp.test',
-      user: { ...person, isAdmin: true },
-    };
+    const deps = scriptedDeps(store);
     const result = await executeTurn({
       ...deps,
       channelId: defaultChannel,
@@ -590,12 +595,7 @@ describe('turns and runs', () => {
   it('reclaims a queued child run after a worker restart', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, ['admin@example.com']);
-    const deps = {
-      store,
-      agent: createScriptedAgentRunner(),
-      mcpUrl: 'http://mcp.test',
-      user: { ...person, isAdmin: true },
-    };
+    const deps = scriptedDeps(store);
     await executeTurn({
       ...deps,
       channelId: defaultChannel,
@@ -767,7 +767,7 @@ describe('turns and runs', () => {
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'coder',
-      toolName: 'mcp__mock__echo',
+      toolName: MCP_ECHO,
       args: { text: 'hello' },
       channelId: defaultChannel,
       run,
@@ -838,7 +838,7 @@ describe('capability grants', () => {
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
-      toolName: 'mcp__mock__echo',
+      toolName: MCP_ECHO,
       args: { text: 'hello' },
       run,
     });
@@ -862,7 +862,7 @@ describe('capability grants', () => {
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
-      toolName: 'mcp__mock__echo',
+      toolName: MCP_ECHO,
       args: { text: 'hello' },
       run,
     });

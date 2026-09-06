@@ -16,7 +16,6 @@ import {
   matchChannelPolicy,
   MCP_ECHO,
   nextRoutineRun,
-  pageHost,
   RESOURCE_COMPONENT_NOTE,
   RESOURCE_MCP_ECHO,
   runMayInvoke,
@@ -32,7 +31,6 @@ type GatewayResult = {
   ok: boolean;
   reason: string;
   matched: string | null;
-  result?: Record<string, unknown>;
   output: string;
 };
 
@@ -42,7 +40,6 @@ type GatewayInput = {
   botId: string;
   channelId?: string;
   mcpUrl: string;
-  pageUrl?: string;
   run?: RunRecord;
   store: GabotStore;
   toolName: string;
@@ -59,8 +56,7 @@ export async function runGatewayAction(input: GatewayInput): Promise<GatewayResu
     return { ok: false, reason: message, matched: 'authority', output: message };
   }
   const policy = await input.store.getPolicy();
-  const url = asString(input.args.url) || input.pageUrl || '';
-  const context = policyContext(input, url);
+  const context = policyContext(input);
   const decision = evaluateActionPolicy(policy, context);
 
   if (!decision.forward) {
@@ -524,8 +520,7 @@ function boolArg(value: unknown): boolean | undefined {
   return undefined;
 }
 
-function policyContext(input: GatewayInput, url: string): PolicyContext {
-  const host = pageHost(url);
+function policyContext(input: GatewayInput): PolicyContext {
   const mcp =
     input.toolName === MCP_ECHO
       ? { server: 'mock', tool: 'echo', effect: 'write' as const }
@@ -533,7 +528,7 @@ function policyContext(input: GatewayInput, url: string): PolicyContext {
   return {
     tool: { name: input.toolName },
     bot: { id: input.botId },
-    page: { url, host },
+    page: { url: '', host: '' },
     actor: { id: input.actorId },
     intent: 'write_tool',
     mcp,
