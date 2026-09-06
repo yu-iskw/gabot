@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  membershipCoversWorkspace,
   membershipIsActive,
   parseMembershipStatus,
   parseMembershipStatusOrActive,
@@ -50,6 +51,19 @@ describe('membershipIsActive', () => {
         status: 'revoked',
       }),
     ).toBe(false);
+  });
+
+  it('covers a workspace only for an active row on that workspace', () => {
+    const active = {
+      workspaceId: 'ws-gabot',
+      userId: 'user-1',
+      role: 'member' as const,
+      status: 'active' as const,
+    };
+    expect(membershipCoversWorkspace(active, 'ws-gabot')).toBe(true);
+    expect(membershipCoversWorkspace(active, 'ws-pay')).toBe(false);
+    expect(membershipCoversWorkspace(null, 'ws-gabot')).toBe(false);
+    expect(membershipCoversWorkspace({ ...active, status: 'revoked' }, 'ws-gabot')).toBe(false);
   });
 });
 

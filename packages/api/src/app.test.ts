@@ -73,7 +73,7 @@ function scriptedDeps(store: MemoryStore) {
   };
 }
 
-async function ownerRun(store: MemoryStore) {
+async function ownerRun(store: MemoryStore, ownerUserId = person.id) {
   await store.upsertUser(person, admins);
   const workspace = await store.getWorkspaceForUser(person.id);
   if (!workspace) {
@@ -84,7 +84,7 @@ async function ownerRun(store: MemoryStore) {
     projectId: workspace.projectId,
     channelId: defaultChannel,
     botId: 'general-assistant',
-    ownerUserId: person.id,
+    ownerUserId,
     triggerType: 'interactive',
     status: 'running',
     objective: 'test',
@@ -1478,13 +1478,17 @@ describe('projects and channels', () => {
 });
 
 describe('workspace roles and revocation', () => {
-  async function memberApp() {
+  async function memberApp(role: 'auditor' | 'member' = 'member') {
     const store = new MemoryStore();
     const app = appWith(store);
-    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
+    const other = verifiedPerson(
+      'user-2',
+      role === 'auditor' ? 'auditor@example.com' : 'other@example.com',
+      role === 'auditor' ? 'Auditor' : 'Other',
+    );
     await store.upsertUser(person, admins);
     await store.upsertUser(other, []);
-    await store.upsertMembership({ userId: other.id, role: 'member', status: 'active' });
+    await store.upsertMembership({ userId: other.id, role, status: 'active' });
     const memberToken = peopleAuth.mintIdToken({
       subject: other.id,
       email: other.email,
@@ -1526,22 +1530,13 @@ describe('workspace roles and revocation', () => {
   });
 
   it('lets an auditor read audit and refuses grant writes', async () => {
-    const store = new MemoryStore();
-    const app = appWith(store);
-    const auditor = verifiedPerson('user-2', 'auditor@example.com', 'Auditor');
-    await store.upsertUser(person, admins);
-    await store.upsertUser(auditor, []);
-    await store.upsertMembership({ userId: auditor.id, role: 'auditor', status: 'active' });
-    const token = peopleAuth.mintIdToken({
-      subject: auditor.id,
-      email: auditor.email,
-      name: auditor.name,
-    });
-    const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
-    expect((await app.request('/api/admin/audit-events', { headers })).status).toBe(200);
+    const { app, memberHeaders } = await memberApp('auditor');
+    expect((await app.request('/api/admin/audit-events', { headers: memberHeaders })).status).toBe(
+      200,
+    );
     const grant = await app.request('/api/admin/capability-grants', {
       method: 'PUT',
-      headers,
+      headers: memberHeaders,
       body: JSON.stringify({
         provider: PROVIDER_GITHUB,
         capability: CAPABILITY_GITHUB_ISSUES_CREATE,
@@ -1553,22 +1548,7 @@ describe('workspace roles and revocation', () => {
 
   it('does not let a member spend or re-grant another member owner connection', async () => {
     const { store, app, other } = await memberApp();
-    const workspace = await store.getWorkspaceForUser(person.id);
-    if (!workspace) {
-      throw new Error('workspace missing');
-    }
-    const run = await store.createRun({
-      workspaceId: workspace.id,
-      projectId: workspace.projectId,
-      channelId: defaultChannel,
-      botId: 'general-assistant',
-      ownerUserId: other.id,
-      triggerType: 'interactive',
-      status: 'running',
-      objective: 'issue',
-      authority: rootAuthority(TURN_TOOL_NAMES),
-      depth: 0,
-    });
+    const { run, workspace } = await ownerRun(store, other.id);
     const denied = await runGatewayAction({
       store,
       mcpUrl: 'http://mcp.test',
@@ -1608,9 +1588,7 @@ describe('workspace roles and revocation', () => {
     await store.upsertMembership({ userId: other.id, role: 'member', status: 'revoked' });
     await expect(
       executeTurn({
-        store,
-        agent: createScriptedAgentRunner(),
-        mcpUrl: 'http://mcp.test',
+        ...scriptedDeps(store),
         user: { ...other, isAdmin: false },
         channelId: defaultChannel,
         message: 'hello',
@@ -1618,16 +1596,9 @@ describe('workspace roles and revocation', () => {
     ).rejects.toThrow(/membership/);
     const { run } = await ownerRun(store);
     await store.upsertMembership({ userId: person.id, role: 'admin', status: 'revoked' });
-    await expect(
-      executeRun({
-        store,
-        agent: createScriptedAgentRunner(),
-        mcpUrl: 'http://mcp.test',
-        user: { ...person, isAdmin: true },
-        runId: run.id,
-        run,
-      }),
-    ).rejects.toThrow(/membership/);
+    await expect(executeRun({ ...scriptedDeps(store), runId: run.id, run })).rejects.toThrow(
+      /membership/,
+    );
     const app = appWith(store);
     const executed = await app.request('/api/internal/runs/execute', {
       method: 'POST',

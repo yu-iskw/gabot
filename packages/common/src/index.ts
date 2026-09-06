@@ -111,6 +111,7 @@ export {
 export type { SeedParticipant, TeamBotProfile } from './tenancy.js';
 export {
   MEMBERSHIP_STATUSES,
+  membershipCoversWorkspace,
   membershipIsActive,
   parseMembershipStatus,
   parseMembershipStatusOrActive,

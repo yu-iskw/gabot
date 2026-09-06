@@ -3,6 +3,7 @@ import {
   asString,
   matchesToken,
   mcpCapabilityForRef,
+  membershipCoversWorkspace,
   membershipIsActive,
   parseMembershipStatusOrActive,
   parseWorkspaceRole,
@@ -777,16 +778,14 @@ function registerInternalRoutes(
     if (!run) {
       return context.json({ error: INVALID_BODY }, 400);
     }
-    const owner = await options.store.getUser(run.ownerUserId);
+    const [owner, membership] = await Promise.all([
+      options.store.getUser(run.ownerUserId),
+      options.store.getMembership(run.ownerUserId),
+    ]);
     if (!owner) {
       return context.json({ error: INVALID_BODY }, 400);
     }
-    const membership = await options.store.getMembership(owner.id);
-    if (
-      !membership ||
-      !membershipIsActive(membership) ||
-      membership.workspaceId !== run.workspaceId
-    ) {
+    if (!membershipCoversWorkspace(membership, run.workspaceId)) {
       return context.json({ error: NOT_FOUND }, 404);
     }
     const result = await executeRun({
@@ -811,24 +810,17 @@ async function requireOwnedChannel(
   channelId: string,
 ): Promise<
   | { channel: ChannelRecord; ok: true; workspace: WorkspaceRecord }
-  | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
+  | { body: Record<string, unknown>; ok: false; status: 404 }
 > {
   const channel = await store.getChannel(channelId, user.id);
   if (!channel) {
     return { ok: false, status: 404, body: { error: NOT_FOUND } };
   }
-  const [scope, membership, workspace] = await Promise.all([
+  const [scope, workspace] = await Promise.all([
     store.getChannelScope(channelId),
-    store.getMembership(user.id),
     store.getWorkspaceForUser(user.id),
   ]);
-  if (
-    !scope ||
-    !workspace ||
-    !membership ||
-    !membershipIsActive(membership) ||
-    membership.workspaceId !== scope.workspaceId
-  ) {
+  if (!scope || !workspace || workspace.id !== scope.workspaceId) {
     return { ok: false, status: 404, body: { error: NOT_FOUND } };
   }
   return { ok: true, channel, workspace };

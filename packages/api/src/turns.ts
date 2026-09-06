@@ -3,7 +3,7 @@ import {
   collectText,
   collectToolCalls,
   decideScriptedTurn,
-  membershipIsActive,
+  membershipCoversWorkspace,
   mentionedBotId,
   parseAguiSse,
   rootAuthority,
@@ -125,11 +125,7 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
     throw new TurnClientError(`Bot ${botId} is not a participant on channel ${input.channelId}.`);
   }
   const membership = await input.store.getMembership(input.user.id);
-  if (
-    !membership ||
-    !membershipIsActive(membership) ||
-    membership.workspaceId !== scope.workspaceId
-  ) {
+  if (!membershipCoversWorkspace(membership, scope.workspaceId)) {
     throw new TurnClientError(
       'Active workspace membership is required to start a run on this channel.',
     );
@@ -184,11 +180,7 @@ export async function executeRun(input: ExecuteRunInput): Promise<TurnResult> {
     return { runId: run.id, text: '', toolNames: [] };
   }
   const membership = await input.store.getMembership(input.user.id);
-  if (
-    !membership ||
-    !membershipIsActive(membership) ||
-    membership.workspaceId !== run.workspaceId
-  ) {
+  if (!membershipCoversWorkspace(membership, run.workspaceId)) {
     throw new TurnClientError('Active workspace membership is required to execute this run.');
   }
   await input.store.updateRunStatus(run.id, 'running');
