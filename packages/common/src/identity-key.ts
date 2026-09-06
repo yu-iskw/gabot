@@ -1,4 +1,5 @@
 import {
+  contractFail,
   contractOk,
   parseNonEmptyString,
   parseOptionalNonEmptyString,
@@ -54,10 +55,16 @@ export function serializeIdentityKey(key: IdentityKey): string {
 }
 
 function parseIssuer(value: unknown): ContractResult<string> {
-  const url = parseAbsoluteHttpUrl(value, 'Identity issuer');
+  const raw = parseNonEmptyString(value, 'Identity issuer is required.');
+  if (!raw.ok) {
+    return raw;
+  }
+  const url = parseAbsoluteHttpUrl(raw.value, 'Identity issuer');
   if (!url.ok) {
     return url;
   }
-  const path = url.value.pathname === '/' ? '' : url.value.pathname.replace(/\/$/u, '');
-  return contractOk(`${url.value.origin}${path}`);
+  if (url.value.search.length > 0 || url.value.hash.length > 0) {
+    return contractFail('Identity issuer must not include query or fragment.');
+  }
+  return contractOk(raw.value);
 }

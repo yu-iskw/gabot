@@ -6,6 +6,7 @@ import {
   assertEventInScope,
   bindBootstrapDiscovery,
   contractError,
+  parseBootstrapDiscovery,
   parseScopedFeedEvent,
 } from './protocol-contracts.js';
 import { parseRunIdentity } from './run-identity.js';
@@ -88,6 +89,32 @@ describe('bootstrap discovery', () => {
     expect(apiVersionsCompatible('v1.4.0', '1.0.0')).toBe(true);
     expect(apiVersionsCompatible('v2', 'v1')).toBe(false);
   });
+
+  it('rejects blank issuer or audience when those fields are present', () => {
+    const base = {
+      apiVersion: 'v1',
+      backendId: 'backend-engineering',
+      workspaceId: 'ws-1',
+    };
+    expect(
+      parseBootstrapDiscovery({
+        ...base,
+        auth: { issuer: '', type: 'oidc' },
+      }).ok,
+    ).toBe(false);
+    expect(
+      parseBootstrapDiscovery({
+        ...base,
+        auth: { audience: '   ', type: 'oidc' },
+      }).ok,
+    ).toBe(false);
+    expect(
+      parseBootstrapDiscovery({
+        ...base,
+        auth: { type: 'oidc' },
+      }).ok,
+    ).toBe(true);
+  });
 });
 
 describe('scoped events', () => {
@@ -112,6 +139,22 @@ describe('scoped events', () => {
     if (event.ok && payments.ok) {
       expect(assertEventInScope(event.value, payments.value).ok).toBe(false);
     }
+  });
+
+  it('rejects occurredAt values that are not ISO-8601 instants', () => {
+    const ref = {
+      backendId: 'backend-engineering',
+      localId: 'evt-1',
+      origin: ENGINEERING_ORIGIN,
+      resourceType: 'event',
+      workspaceId: 'ws-1',
+    };
+    expect(parseScopedFeedEvent({ cursor: 'c1', occurredAt: '09/06/2026', ref }).ok).toBe(false);
+    expect(parseScopedFeedEvent({ cursor: 'c1', occurredAt: 'Sep 6 2026', ref }).ok).toBe(false);
+    expect(parseScopedFeedEvent({ cursor: 'c1', occurredAt: '2026', ref }).ok).toBe(false);
+    expect(parseScopedFeedEvent({ cursor: 'c1', occurredAt: '2026-02-31T00:00:00Z', ref }).ok).toBe(
+      false,
+    );
   });
 });
 

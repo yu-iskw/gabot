@@ -2,7 +2,6 @@ import {
   contractFail,
   contractOk,
   parseNonEmptyString,
-  parseOptionalNonEmptyString,
   parseRecord,
   parseStringUnion,
 } from './contract-result.js';
@@ -160,11 +159,11 @@ function parseOidcAuth(value: unknown): ContractResult<BootstrapDiscovery['auth'
   if (!type.ok) {
     return type;
   }
-  const issuer = parseOptionalNonEmptyString(record.value.issuer, AUTH_STRING_REASON);
+  const issuer = parsePresentAuthString(record.value.issuer);
   if (!issuer.ok) {
     return issuer;
   }
-  const audience = parseOptionalNonEmptyString(record.value.audience, AUTH_STRING_REASON);
+  const audience = parsePresentAuthString(record.value.audience);
   if (!audience.ok) {
     return audience;
   }
@@ -175,15 +174,121 @@ function parseOidcAuth(value: unknown): ContractResult<BootstrapDiscovery['auth'
   });
 }
 
+function parsePresentAuthString(value: unknown): ContractResult<string | undefined> {
+  if (value === undefined || value === null) {
+    return contractOk(undefined);
+  }
+  return parseNonEmptyString(value, AUTH_STRING_REASON);
+}
+
 function parseOccurredAt(value: unknown): ContractResult<string> {
   const raw = parseNonEmptyString(value, 'occurredAt is required.');
   if (!raw.ok) {
     return raw;
   }
-  if (Number.isNaN(Date.parse(raw.value))) {
+  if (!isIso8601Instant(raw.value)) {
     return contractFail('occurredAt is not an ISO-8601 timestamp.');
   }
   return contractOk(raw.value);
+}
+
+function isIso8601Instant(value: string): boolean {
+  const separator = value.indexOf('T');
+  if (separator !== 10) {
+    return false;
+  }
+  const date = parseIsoDate(value.slice(0, 10));
+  if (date === undefined) {
+    return false;
+  }
+  return parseIsoTimeAndOffset(value.slice(11));
+}
+
+function parseIsoDate(value: string): { day: number; month: number; year: number } | undefined {
+  if (value.length !== 10 || value[4] !== '-' || value[7] !== '-') {
+    return undefined;
+  }
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return undefined;
+  }
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return undefined;
+  }
+  return { day, month, year };
+}
+
+function parseIsoTimeAndOffset(value: string): boolean {
+  const offset = isoOffsetSuffix(value);
+  if (offset === undefined) {
+    return false;
+  }
+  return parseIsoClock(value.slice(0, value.length - offset.length));
+}
+
+function isoOffsetSuffix(value: string): string | undefined {
+  if (value.endsWith('Z')) {
+    return 'Z';
+  }
+  if (value.length < 6) {
+    return undefined;
+  }
+  const suffix = value.slice(-6);
+  const sign = suffix[0];
+  if ((sign !== '+' && sign !== '-') || suffix[3] !== ':') {
+    return undefined;
+  }
+  const hours = Number(suffix.slice(1, 3));
+  const minutes = Number(suffix.slice(4, 6));
+  if (!Number.isInteger(hours) || hours > 23 || !Number.isInteger(minutes) || minutes > 59) {
+    return undefined;
+  }
+  return suffix;
+}
+
+function parseIsoClock(value: string): boolean {
+  if (value.length < 8 || value[2] !== ':' || value[5] !== ':') {
+    return false;
+  }
+  const hour = Number(value.slice(0, 2));
+  const minute = Number(value.slice(3, 5));
+  const secondChunk = value.slice(6);
+  const fractionAt = secondChunk.indexOf('.');
+  const secondText = fractionAt === -1 ? secondChunk : secondChunk.slice(0, fractionAt);
+  const fraction = fractionAt === -1 ? '' : secondChunk.slice(fractionAt + 1);
+  return (
+    isIsoHms(hour, minute, Number(secondText), secondText) && isIsoFraction(fractionAt, fraction)
+  );
+}
+
+function isIsoHms(hour: number, minute: number, second: number, secondText: string): boolean {
+  if (secondText.length !== 2 || !Number.isInteger(hour) || !Number.isInteger(minute)) {
+    return false;
+  }
+  return Number.isInteger(second) && hour <= 23 && minute <= 59 && second <= 60;
+}
+
+function isIsoFraction(fractionAt: number, fraction: string): boolean {
+  return fractionAt === -1 || isShortDigitString(fraction);
+}
+
+function isShortDigitString(value: string): boolean {
+  if (value.length === 0 || value.length > 9) {
+    return false;
+  }
+  for (const character of value) {
+    if (character < '0' || character > '9') {
+      return false;
+    }
+  }
+  return true;
 }
 
 function majorVersion(version: string): string {

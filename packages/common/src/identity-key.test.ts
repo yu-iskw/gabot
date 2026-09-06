@@ -44,7 +44,7 @@ describe('parseIdentityKey', () => {
   it('keeps the same person when only the email attribute changes', () => {
     const left = parseIdentityKey({
       email: 'old@example.com',
-      issuer: `${ISSUER}/`,
+      issuer: ISSUER,
       subject: 'sub-1',
       tenant: 'acme',
     });
@@ -72,5 +72,19 @@ describe('parseIdentityKey', () => {
     if (left.ok && right.ok) {
       expect(identityKeyEquals(left.value, right.value)).toBe(false);
     }
+  });
+
+  it('keeps a trailing slash as part of the issuer identifier', () => {
+    const slashless = parseIdentityKey({ issuer: ISSUER, subject: 'sub-1' });
+    const slashed = parseIdentityKey({ issuer: `${ISSUER}/`, subject: 'sub-1' });
+    expect(slashless.ok && slashed.ok).toBe(true);
+    if (slashless.ok && slashed.ok) {
+      expect(identityKeyEquals(slashless.value, slashed.value)).toBe(false);
+    }
+  });
+
+  it('rejects an issuer that includes a query or fragment', () => {
+    expect(parseIdentityKey({ issuer: `${ISSUER}?tenant=a`, subject: 'sub-1' }).ok).toBe(false);
+    expect(parseIdentityKey({ issuer: `${ISSUER}#x`, subject: 'sub-1' }).ok).toBe(false);
   });
 });
