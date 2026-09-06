@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseSessionMe, sessionOrigin, sessionQueryKey } from './session-scope.js';
+import {
+  parseSessionMe,
+  sessionMembershipLabel,
+  sessionOrigin,
+  sessionQueryKey,
+} from './session-scope.js';
 
 import type { SessionScope } from './session-scope.js';
 
@@ -31,6 +36,9 @@ describe('sessionQueryKey', () => {
     expect(sessionQueryKey(left, 'channels')).not.toEqual(
       sessionQueryKey({ ...left, generation: 2 }, 'channels'),
     );
+    expect(sessionQueryKey(left, 'channels')).not.toEqual(
+      sessionQueryKey({ ...left, workspaceId: null }, 'channels'),
+    );
   });
 });
 
@@ -44,6 +52,17 @@ describe('sessionOrigin', () => {
   it('falls back for relative or empty API bases', () => {
     expect(sessionOrigin('', 'https://app.example')).toBe('https://app.example');
     expect(sessionOrigin('/api', 'https://app.example')).toBe('https://app.example');
+  });
+});
+
+describe('sessionMembershipLabel', () => {
+  it('joins workspace and role, or uses the empty fallback', () => {
+    expect(sessionMembershipLabel({ workspaceId: 'ws-gabot', role: 'admin' })).toBe(
+      'ws-gabot · admin',
+    );
+    expect(
+      sessionMembershipLabel({ workspaceId: null, role: null }, 'No workspace membership'),
+    ).toBe('No workspace membership');
   });
 });
 

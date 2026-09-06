@@ -2,7 +2,7 @@ export type SessionScope = {
   generation: number;
   origin: string;
   principalId: string;
-  workspaceId: string;
+  workspaceId: string | null;
 };
 
 export type SessionMe = {
@@ -27,6 +27,13 @@ export function sessionOrigin(apiBase: string, fallbackOrigin: string): string {
     return new URL(apiBase).origin;
   }
   return fallbackOrigin;
+}
+
+export function sessionMembershipLabel(
+  me: Pick<SessionMe, 'role' | 'workspaceId'>,
+  empty = '',
+): string {
+  return [me.workspaceId, me.role].filter(Boolean).join(' · ') || empty;
 }
 
 export function parseSessionMe(value: unknown): SessionMe {

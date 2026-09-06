@@ -10,6 +10,7 @@ import { Input } from '../components/ui/input.js';
 import { useAuth } from '../lib/auth-context.js';
 import { resolveProjectId } from '../lib/resolve-project-id.js';
 import { useSession } from '../lib/session-context.js';
+import { sessionMembershipLabel } from '../lib/session-scope.js';
 
 import type { Coworker } from '../lib/agents.js';
 import type { NamedProject } from '../lib/project-channels.js';
@@ -148,7 +149,7 @@ export function HomePage() {
             className="mt-2 w-full text-center text-xs text-muted-foreground"
             data-testid="composer-workspace"
           >
-            {[me.workspaceId, me.role].filter(Boolean).join(' · ') || 'No workspace membership'}
+            {sessionMembershipLabel(me, 'No workspace membership')}
           </p>
           <p className="mt-2 w-full text-center text-xs text-muted-foreground">
             Sent to the coworker it is for. Type <code>@</code> to choose one yourself.

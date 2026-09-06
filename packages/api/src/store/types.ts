@@ -142,6 +142,13 @@ export type SessionUser = {
   name: string;
 };
 
+export type SessionMeResponse = SessionUser & {
+  defaultChannelId: string | null;
+  membershipStatus: MembershipStatus | null;
+  role: WorkspaceRole | null;
+  workspaceId: string | null;
+};
+
 export type WorkspaceRecord = {
   defaultChannelId: string;
   id: string;

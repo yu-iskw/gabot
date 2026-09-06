@@ -19,6 +19,7 @@ import { useAuth } from '../lib/auth-context.js';
 import { matchingChannels } from '../lib/channel-search.js';
 import { groupChannelsByProject } from '../lib/project-channels.js';
 import { useSession } from '../lib/session-context.js';
+import { sessionMembershipLabel } from '../lib/session-scope.js';
 import { useSidebar } from '../lib/sidebar-context.js';
 import { cn } from '../lib/utils.js';
 
@@ -144,7 +145,7 @@ export function AppSidebar() {
                   className="block truncate text-[11px] text-muted-foreground"
                   data-testid="workspace-session"
                 >
-                  {[me.workspaceId, me.role].filter(Boolean).join(' · ')}
+                  {sessionMembershipLabel(me)}
                 </span>
               </span>
               <Button

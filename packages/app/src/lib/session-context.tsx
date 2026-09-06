@@ -5,9 +5,7 @@ import { apiJson } from '../api.js';
 import { apiBase } from '../config.js';
 
 import { useAuth } from './auth-context.js';
-import { syncAuthQueryCache } from './auth-query-cache.js';
 import { parseSessionMe, sessionOrigin, sessionQueryKey } from './session-scope.js';
-import { workspaceDefaultChannelId } from './workspace-channel.js';
 
 import type { SessionMe, SessionScope } from './session-scope.js';
 import type { ReactNode } from 'react';
@@ -15,7 +13,6 @@ import type { ReactNode } from 'react';
 type SessionValue = {
   me: SessionMe;
   queryKey: (...parts: readonly unknown[]) => unknown[];
-  scope: SessionScope;
 };
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -23,44 +20,32 @@ const SessionContext = createContext<SessionValue | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { token, user } = useAuth();
   const queryClient = useQueryClient();
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
   const generationRef = useRef(1);
-  const workspaceRef = useRef<string | null>(null);
+  const workspaceRef = useRef<string | null | undefined>(undefined);
   const [me, setMe] = useState<SessionMe | null>(null);
-  const [scope, setScope] = useState<SessionScope | null>(null);
+  const [origin, setOrigin] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setMe(null);
+    setOrigin(null);
+    setError(null);
     const request = { ignore: false };
     void (async () => {
       try {
-        const parsed = parseSessionMe(await apiJson<unknown>('/api/me', await token()));
+        const parsed = parseSessionMe(await apiJson<unknown>('/api/me', await tokenRef.current()));
         if (request.ignore) {
           return;
         }
-        const workspaceId = parsed.workspaceId ?? 'none';
-        const meWithChannel: SessionMe = {
-          ...parsed,
-          defaultChannelId:
-            parsed.defaultChannelId ??
-            (parsed.workspaceId ? workspaceDefaultChannelId(parsed.workspaceId) : null),
-        };
-        if (workspaceRef.current !== null && workspaceRef.current !== workspaceId) {
-          const previousGeneration = generationRef.current;
+        if (workspaceRef.current !== undefined && workspaceRef.current !== parsed.workspaceId) {
           generationRef.current += 1;
-          syncAuthQueryCache(
-            queryClient,
-            { generation: previousGeneration, uid: user?.uid ?? null },
-            { generation: generationRef.current, uid: user?.uid ?? null },
-          );
+          queryClient.clear();
         }
-        workspaceRef.current = workspaceId;
-        setMe(meWithChannel);
-        setScope({
-          generation: generationRef.current,
-          origin: sessionOrigin(apiBase(), window.location.origin),
-          principalId: parsed.id,
-          workspaceId,
-        });
+        workspaceRef.current = parsed.workspaceId;
+        setMe(parsed);
+        setOrigin(sessionOrigin(apiBase(), window.location.origin));
         setError(null);
       } catch {
         if (!request.ignore) {
@@ -71,18 +56,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       request.ignore = true;
     };
-  }, [queryClient, token, user?.uid]);
+  }, [queryClient, user?.uid]);
 
   const value = useMemo<SessionValue | null>(() => {
-    if (!me || !scope) {
+    if (!me || !origin) {
       return null;
     }
+    const scope: SessionScope = {
+      generation: generationRef.current,
+      origin,
+      principalId: me.id,
+      workspaceId: me.workspaceId,
+    };
     return {
       me,
       queryKey: (...parts: readonly unknown[]) => sessionQueryKey(scope, ...parts),
-      scope,
     };
-  }, [me, scope]);
+  }, [me, origin]);
 
   if (error) {
     return <p className="p-6 text-sm text-muted-foreground">{error}</p>;
