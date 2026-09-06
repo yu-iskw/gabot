@@ -11,6 +11,7 @@ import {
   defaultChannelParticipants,
   defaultOwnerConnections,
   defaultOwnerGrants,
+  identityKeyEquals,
   nextRoutineRun,
   ownerConnectionId,
   personalChannelId,
@@ -59,7 +60,7 @@ import type {
   WorkRecord,
   WorkspaceRecord,
 } from './types.js';
-import type { ActionPolicy, AuthorityEnvelope, VerifiedPerson } from '@gabot/common';
+import type { ActionPolicy, AuthorityEnvelope, IdentityKey, VerifiedPerson } from '@gabot/common';
 
 /* eslint-disable @typescript-eslint/require-await -- GabotStore is async for Postgres. */
 
@@ -112,16 +113,25 @@ export class MemoryStore implements GabotStore {
   ];
   private policy: ActionPolicy = { ...DEFAULT_ALLOW_POLICY, deny: [...DEFAULT_ALLOW_POLICY.deny] };
 
-  public async upsertUser(person: VerifiedPerson, adminEmails: string[]): Promise<SessionUser> {
-    const isAdmin = adminEmails.includes(person.email.toLowerCase());
-    const existing = [...this.users.values()].find((row) => row.email === person.email);
+  public async upsertUser(
+    person: VerifiedPerson,
+    adminIdentities: IdentityKey[],
+  ): Promise<SessionUser> {
+    const isAdmin = adminIdentities.some((admin) => identityKeyEquals(admin, person.identity));
+    const existing = [...this.users.values()].find((row) =>
+      identityKeyEquals(row.identity, person.identity),
+    );
     const user: UserRow = existing ?? {
       id: person.id,
       email: person.email,
       name: person.name,
+      identity: person.identity,
       isAdmin,
     };
-    user.isAdmin = isAdmin || user.isAdmin;
+    user.email = person.email;
+    user.name = person.name;
+    user.identity = person.identity;
+    user.isAdmin = isAdmin;
     this.users.set(user.id, user);
     this.ensurePersonalWorkspace(user);
     return user;

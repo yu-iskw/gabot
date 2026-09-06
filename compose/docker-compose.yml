@@ -127,6 +127,8 @@ services:
       DATABASE_URL: postgres://gabot:gabot@omni:5432/gabot
       FIREBASE_AUTH_EMULATOR_HOST: auth:9099
       FIREBASE_PROJECT_ID: demo-gabot
+      GABOT_TOKEN_ISSUER: https://securetoken.google.com/demo-gabot
+      GABOT_TOKEN_AUDIENCE: demo-gabot
       AGENT_URL: http://agent:4200
       MCP_MOCK_URL: http://mcp-mock:4300
       GABOT_IDENTITY_SECRET: gabot-dev-identity-secret

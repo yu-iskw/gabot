@@ -24,6 +24,9 @@ export type {
   VerifiedPerson,
 } from './ports.js';
 export { createLocalAgentIdentity, spiffePrincipal } from './local-identity.js';
+export { createScriptedPeopleAuth } from './scripted-people-auth.js';
+export type { ScriptedPeopleAuth } from './scripted-people-auth.js';
+export { personFromIdTokenClaims } from './id-token-claims.js';
 export { createStaticRegistry } from './static-registry.js';
 export {
   ASK_PERSON,

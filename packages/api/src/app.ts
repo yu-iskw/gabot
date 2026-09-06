@@ -24,7 +24,7 @@ import { executeRun, executeTurn, isTurnClientError } from './turns.js';
 
 import type { AuthVariables } from './auth.js';
 import type { AgentRunner } from './turns.js';
-import type { ActionPolicy, PeopleAuthPort } from '@gabot/common';
+import type { ActionPolicy, IdentityKey, PeopleAuthPort } from '@gabot/common';
 
 type ApiOptions = {
   store: GabotStore;
@@ -32,7 +32,7 @@ type ApiOptions = {
   agent: AgentRunner;
   mcpUrl: string;
   workerSecret: string;
-  adminEmails: string[];
+  adminIdentities: IdentityKey[];
 };
 
 const BOT = PROTECTED_AGENT_ID;
@@ -54,7 +54,7 @@ export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariabl
   app.use('*', cors());
   app.get('/health', (context) => context.json({ status: 'ok', plane: 'control' }));
 
-  const auth = requireUser(options.peopleAuth, options.store, options.adminEmails);
+  const auth = requireUser(options.peopleAuth, options.store, options.adminIdentities);
   app.use('/api/me', auth);
   app.use(API_CHANNELS, auth);
   app.use(`${API_CHANNELS}/*`, auth);

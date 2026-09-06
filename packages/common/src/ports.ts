@@ -1,6 +1,9 @@
+import type { IdentityKey } from './identity-key.js';
+
 export type VerifiedPerson = {
-  id: string;
   email: string;
+  id: string;
+  identity: IdentityKey;
   name: string;
 };
 

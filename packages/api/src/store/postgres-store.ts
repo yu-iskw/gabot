@@ -4,6 +4,7 @@ import {
   DEFAULT_CHANNEL_NAME,
   DEFAULT_PROJECT_NAME,
   defaultChannelParticipants,
+  identityKeyEquals,
   nextRoutineRun,
   personalChannelId,
   personalProjectId,
@@ -54,7 +55,7 @@ import type {
   WorkRecord,
   WorkspaceRecord,
 } from './types.js';
-import type { ActionPolicy, AuthorityEnvelope, VerifiedPerson } from '@gabot/common';
+import type { ActionPolicy, AuthorityEnvelope, IdentityKey, VerifiedPerson } from '@gabot/common';
 
 type Sql = ReturnType<typeof postgres>;
 type TxSql = postgres.TransactionSql;
@@ -62,33 +63,50 @@ type TxSql = postgres.TransactionSql;
 export class PostgresStore implements GabotStore {
   public constructor(private readonly sql: Sql) {}
 
-  public async upsertUser(person: VerifiedPerson, adminEmails: string[]): Promise<SessionUser> {
+  public async upsertUser(
+    person: VerifiedPerson,
+    adminIdentities: IdentityKey[],
+  ): Promise<SessionUser> {
+    const tenant = person.identity.tenant ?? '';
+    const isAdmin = adminIdentities.some((admin) => identityKeyEquals(admin, person.identity));
     await this.sql`
-      INSERT INTO users (id, email, name)
-      VALUES (${person.id}, ${person.email}, ${person.name})
-      ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+      INSERT INTO users (id, email, name, issuer, subject, tenant)
+      VALUES (
+        ${person.id}, ${person.email}, ${person.name},
+        ${person.identity.issuer}, ${person.identity.subject}, ${tenant}
+      )
+      ON CONFLICT (issuer, tenant, subject) DO UPDATE
+      SET email = EXCLUDED.email, name = EXCLUDED.name, updated_at = now()
     `;
-    const rows = await this.sql<{ id: string; email: string; name: string | null }[]>`
-      SELECT id, email, name FROM users WHERE email = ${person.email}
+    const rows = await this.sql<
+      {
+        email: string;
+        id: string;
+        issuer: string;
+        name: string | null;
+        subject: string;
+        tenant: string;
+      }[]
+    >`
+      SELECT id, email, name, issuer, subject, tenant
+      FROM users
+      WHERE issuer = ${person.identity.issuer}
+        AND tenant = ${tenant}
+        AND subject = ${person.identity.subject}
     `;
     const user = rows.at(0);
     if (user === undefined) {
       throw new Error('Failed to upsert user.');
     }
-    const isAdmin = adminEmails.includes(person.email.toLowerCase());
     if (isAdmin) {
       await this.sql`
         INSERT INTO user_roles (user_id, role) VALUES (${user.id}, 'admin')
         ON CONFLICT DO NOTHING
       `;
     }
-    await this.ensurePersonalWorkspace({
-      id: user.id,
-      email: user.email,
-      name: user.name ?? person.name,
-      isAdmin,
-    });
-    return { id: user.id, email: user.email, name: user.name ?? person.name, isAdmin };
+    const session = toSessionUser(user, isAdmin);
+    await this.ensurePersonalWorkspace(session);
+    return session;
   }
 
   public async listChannels(userId: string): Promise<ChannelRecord[]> {
@@ -384,8 +402,17 @@ export class PostgresStore implements GabotStore {
   }
 
   public async getUser(userId: string): Promise<SessionUser | null> {
-    const rows = await this.sql<{ id: string; email: string; name: string | null }[]>`
-      SELECT id, email, name FROM users WHERE id = ${userId}
+    const rows = await this.sql<
+      {
+        email: string;
+        id: string;
+        issuer: string;
+        name: string | null;
+        subject: string;
+        tenant: string;
+      }[]
+    >`
+      SELECT id, email, name, issuer, subject, tenant FROM users WHERE id = ${userId}
     `;
     const user = rows.at(0);
     if (user === undefined) {
@@ -394,33 +421,31 @@ export class PostgresStore implements GabotStore {
     const roles = await this.sql<{ role: string }[]>`
       SELECT role FROM user_roles WHERE user_id = ${userId} AND role = 'admin'
     `;
-    const session = {
-      id: user.id,
-      email: user.email,
-      name: user.name ?? user.email,
-      isAdmin: roles.length > 0,
-    };
+    const session = toSessionUser(user, roles.length > 0);
     await this.ensurePersonalWorkspace(session);
     return session;
   }
 
   public async listPeople(): Promise<SessionUser[]> {
     const rows = await this.sql<
-      { id: string; email: string; name: string | null; isAdmin: boolean }[]
+      {
+        email: string;
+        id: string;
+        isAdmin: boolean;
+        issuer: string;
+        name: string | null;
+        subject: string;
+        tenant: string;
+      }[]
     >`
-      SELECT u.id, u.email, u.name,
+      SELECT u.id, u.email, u.name, u.issuer, u.subject, u.tenant,
              EXISTS (
                SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = 'admin'
              ) AS "isAdmin"
       FROM users u
       ORDER BY u.email
     `;
-    return rows.map((row) => ({
-      id: row.id,
-      email: row.email,
-      name: row.name ?? row.email,
-      isAdmin: row.isAdmin,
-    }));
+    return rows.map((row) => toSessionUser(row, row.isAdmin));
   }
 
   public async listPlugins(): Promise<PluginRecord[]> {
@@ -1093,6 +1118,29 @@ export class PostgresStore implements GabotStore {
       ON CONFLICT DO NOTHING
     `;
   }
+}
+
+function toSessionUser(
+  row: {
+    email: string;
+    id: string;
+    issuer: string;
+    name: string | null;
+    subject: string;
+    tenant: string;
+  },
+  isAdmin: boolean,
+): SessionUser {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name ?? row.email,
+    isAdmin,
+    identity:
+      row.tenant.length > 0
+        ? { issuer: row.issuer, subject: row.subject, tenant: row.tenant }
+        : { issuer: row.issuer, subject: row.subject },
+  };
 }
 
 export function createSql(url: string): Sql {

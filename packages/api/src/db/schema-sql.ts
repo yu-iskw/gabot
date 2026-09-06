@@ -3,11 +3,15 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
-  email TEXT NOT NULL UNIQUE,
+  email TEXT NOT NULL,
   name TEXT,
+  issuer TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  tenant TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS users_identity_uidx ON users (issuer, tenant, subject);
 
 CREATE TABLE IF NOT EXISTS user_roles (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -286,6 +290,12 @@ CREATE TABLE IF NOT EXISTS capability_grants (
 );
 
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS project_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS issuer TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subject TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant TEXT NOT NULL DEFAULT '';
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS users_identity_uidx ON users (issuer, tenant, subject);
 
 CREATE TABLE IF NOT EXISTS channel_participants (
   channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,

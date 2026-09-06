@@ -10,13 +10,20 @@ import {
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 
-export const users = pgTable('users', {
-  id: text('id').primaryKey(),
-  email: text('email').notNull().unique(),
-  name: text('name'),
-  createdAt: createdAt(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const users = pgTable(
+  'users',
+  {
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    name: text('name'),
+    issuer: text('issuer').notNull(),
+    subject: text('subject').notNull(),
+    tenant: text('tenant').notNull().default(''),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('users_identity_uidx').on(table.issuer, table.tenant, table.subject)],
+);
 
 export const userRoles = pgTable(
   'user_roles',
