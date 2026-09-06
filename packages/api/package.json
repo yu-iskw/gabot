@@ -1,0 +1,25 @@
+{
+  "name": "@gabot/api",
+  "version": "1.0.0",
+  "description": "Hono control plane: policy gateway, audit, channels, and identity.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "migrate": "node dist/migrate.js"
+  },
+  "dependencies": {
+    "@gabot/common": "workspace:*",
+    "@hono/node-server": "^1.19.0",
+    "drizzle-orm": "^0.45.2",
+    "firebase-admin": "^13.5.0",
+    "hono": "^4.9.8",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  }
+}

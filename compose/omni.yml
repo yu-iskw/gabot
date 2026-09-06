@@ -1,0 +1,10 @@
+# Override to pin AlloyDB Omni instead of the pgvector default.
+# docker compose -f compose/docker-compose.yml -f compose/omni.yml up -d --wait
+services:
+  omni:
+    image: google/alloydbomni:16.8.0
+    environment:
+      POSTGRES_DB: gabot
+      POSTGRES_USER: gabot
+      POSTGRES_PASSWORD: gabot
+      PGDATA: /var/lib/postgresql/data/pgdata
