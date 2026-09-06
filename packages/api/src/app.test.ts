@@ -2,10 +2,10 @@ import {
   asString,
   CAPABILITY_GITHUB_ISSUES_CREATE,
   CAPABILITY_MCP_ECHO,
+  createScriptedPeopleAuth,
   DEFAULT_ALLOW_POLICY,
   GITHUB_ALLOWED_REPO,
   GITHUB_CREATE_ISSUE,
-  matchesToken,
   MCP_ECHO,
   personalChannelId,
   PROVIDER_GITHUB,
@@ -23,19 +23,33 @@ import { runGatewayAction } from './gateway.js';
 import { MemoryStore } from './store/memory-store.js';
 import { createScriptedAgentRunner, executeRun, executeTurn } from './turns.js';
 
-import type { PeopleAuthPort } from '@gabot/common';
+import type { VerifiedPerson } from '@gabot/common';
 
-const person = { id: 'user-1', email: 'admin@example.com', name: 'Admin' };
+const TEST_ISSUER = 'https://id.test/gabot';
+const TEST_AUDIENCE = 'backend-a';
+
+function verifiedPerson(
+  id: string,
+  email: string,
+  name: string,
+  issuer = TEST_ISSUER,
+): VerifiedPerson {
+  return { id, email, name, identity: { issuer, subject: id } };
+}
+
+const person = verifiedPerson('user-1', 'admin@example.com', 'Admin');
+const admins = [person.identity];
 const defaultChannel = personalChannelId(person.id);
-
-const peopleAuth: PeopleAuthPort = {
-  verifyIdToken: (token: string) => {
-    if (!matchesToken('good-token', token)) {
-      return Promise.reject(new Error('bad token'));
-    }
-    return Promise.resolve(person);
-  },
-};
+const peopleAuth = createScriptedPeopleAuth({
+  issuer: TEST_ISSUER,
+  audience: TEST_AUDIENCE,
+  secret: 'test-secret',
+});
+const goodToken = peopleAuth.mintIdToken({
+  subject: person.id,
+  email: person.email,
+  name: person.name,
+});
 
 function appWith(store: MemoryStore) {
   return createApiApp({
@@ -44,7 +58,7 @@ function appWith(store: MemoryStore) {
     agent: createScriptedAgentRunner(),
     mcpUrl: 'http://mcp.test',
     workerSecret: 'worker',
-    adminEmails: ['admin@example.com'],
+    adminIdentities: admins,
   });
 }
 
@@ -58,7 +72,7 @@ function scriptedDeps(store: MemoryStore) {
 }
 
 async function ownerRun(store: MemoryStore) {
-  await store.upsertUser(person, ['admin@example.com']);
+  await store.upsertUser(person, admins);
   const workspace = await store.getWorkspaceForUser(person.id);
   if (!workspace) {
     throw new Error('workspace missing');
@@ -95,6 +109,7 @@ describe('schema sql', () => {
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS connections');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS capability_grants');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS channel_policies');
+    expect(SCHEMA_SQL).toContain('users_identity_uidx');
     expect(SCHEMA_SQL).toContain('workspaces_owner_user_id_uidx');
     expect(SCHEMA_SQL).toContain('channels_project_id_fkey');
     expect(SCHEMA_SQL).toContain(
@@ -122,16 +137,54 @@ describe('control plane', () => {
   it('accepts a verified identity platform token', async () => {
     const app = appWith(new MemoryStore());
     const response = await app.request('/api/me', {
-      headers: { authorization: 'Bearer good-token' },
+      headers: { authorization: `Bearer ${goodToken}` },
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ email: person.email, isAdmin: true });
+    expect(await response.json()).toMatchObject({
+      email: person.email,
+      isAdmin: true,
+      identity: person.identity,
+    });
+  });
+
+  it('keeps two subjects with the same email as separate users', async () => {
+    const store = new MemoryStore();
+    const left = verifiedPerson('user-1', 'same@example.com', 'Left');
+    const right = verifiedPerson(
+      'user-2',
+      'same@example.com',
+      'Right',
+      'https://id.other.test/gabot',
+    );
+    const first = await store.upsertUser(left, [left.identity]);
+    const second = await store.upsertUser(right, []);
+    expect(first.id).toBe('user-1');
+    expect(second.id).toBe('user-2');
+    expect(second.isAdmin).toBe(false);
+    expect(first.identity.subject).not.toBe(second.identity.subject);
+  });
+
+  it('rejects a token minted for another backend audience', async () => {
+    const otherAuth = createScriptedPeopleAuth({
+      issuer: TEST_ISSUER,
+      audience: 'backend-b',
+      secret: 'test-secret',
+    });
+    const foreign = otherAuth.mintIdToken({
+      subject: person.id,
+      email: person.email,
+      name: person.name,
+    });
+    const response = await appWith(new MemoryStore()).request('/api/me', {
+      headers: { authorization: `Bearer ${foreign}` },
+    });
+    expect(response.status).toBe(401);
   });
 
   it('reads and writes action policy on the admin route', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const listed = await app.request('/api/admin/action-policy', { headers });
     expect(listed.status).toBe(200);
     const saved = await app.request('/api/admin/action-policy', {
@@ -146,7 +199,7 @@ describe('control plane', () => {
 
   it('does not expose computer routes', async () => {
     const app = appWith(new MemoryStore());
-    const headers = { authorization: 'Bearer good-token' };
+    const headers = { authorization: `Bearer ${goodToken}` };
     expect((await app.request('/api/computers', { headers })).status).toBe(404);
     expect((await app.request('/api/computers/policy', { headers })).status).toBe(404);
     expect(
@@ -157,7 +210,7 @@ describe('control plane', () => {
   it('refuses a deny rule and names it in audit', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     await app.request('/api/admin/action-policy', {
       method: 'PUT',
       headers,
@@ -185,7 +238,7 @@ describe('control plane', () => {
 
   it('streams a scripted hello turn', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const result = await executeTurn({
       store,
       agent: createScriptedAgentRunner(),
@@ -225,7 +278,7 @@ describe('control plane', () => {
   it('covers session, turn, and internal routes', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     expect((await app.request('/health')).status).toBe(200);
     expect(
       (await app.request('/api/me', { headers: { authorization: 'Bearer nope' } })).status,
@@ -339,7 +392,7 @@ describe('control plane', () => {
 
   it('creates a coworker from a bot turn and lists it', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const result = await executeTurn({
       store,
       agent: createScriptedAgentRunner(),
@@ -352,7 +405,7 @@ describe('control plane', () => {
     const agents = await store.listAgents();
     expect(agents.some((agent) => agent.name === 'Research')).toBe(true);
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const listed = await app.request('/api/agents', { headers });
     expect(listed.status).toBe(200);
     const created = await app.request('/api/agents', {
@@ -365,7 +418,7 @@ describe('control plane', () => {
 
   it('schedules a routine from a bot turn', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const result = await executeTurn({
       store,
       agent: createScriptedAgentRunner(),
@@ -378,7 +431,7 @@ describe('control plane', () => {
     const routines = await store.listRoutinesFor(person.id);
     expect(routines).toHaveLength(1);
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     expect((await app.request('/api/routines', { headers })).status).toBe(200);
     expect((await app.request('/api/skills', { headers })).status).toBe(200);
     expect((await app.request('/api/admin/people', { headers })).status).toBe(200);
@@ -389,7 +442,7 @@ describe('control plane', () => {
   it('grants an MCP tool so a bot may call it, and revokes it again', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const listed = await app.request('/api/admin/plugins', { headers });
     const catalogue = (await listed.json()) as {
       plugins: Array<{ grantedCount: number; id: string; toolCount: number }>;
@@ -427,9 +480,9 @@ describe('control plane', () => {
 
   it('patches and deletes agents, upserts skills, and updates routines conversationally', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const created = await app.request('/api/agents', {
       method: 'POST',
       headers,
@@ -500,8 +553,8 @@ describe('control plane', () => {
 
   it('provisions a personal workspace and channel per user', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
-    await store.upsertUser({ id: 'user-2', email: 'other@example.com', name: 'Other' }, []);
+    await store.upsertUser(person, admins);
+    await store.upsertUser(verifiedPerson('user-2', 'other@example.com', 'Other'), []);
     const first = await store.getWorkspaceForUser(person.id);
     const second = await store.getWorkspaceForUser('user-2');
     expect(first?.ownerUserId).toBe(person.id);
@@ -514,7 +567,7 @@ describe('control plane', () => {
 describe('turns and runs', () => {
   it('persists a root Run for an interactive turn', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const result = await executeTurn({
       store,
       agent: createScriptedAgentRunner(),
@@ -532,7 +585,7 @@ describe('turns and runs', () => {
   it('uses a remaining participant when the default bot was removed', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const removed = await app.request(
       `/api/channels/${defaultChannel}/participants/general-assistant`,
       { method: 'DELETE', headers },
@@ -554,7 +607,7 @@ describe('turns and runs', () => {
 
   it('treats a leading @mention as the root bot', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const result = await executeTurn({
       store,
       agent: createScriptedAgentRunner(),
@@ -570,7 +623,7 @@ describe('turns and runs', () => {
 
   it('delegates monitor to triage to coder through durable child runs', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const deps = scriptedDeps(store);
     const result = await executeTurn({
       ...deps,
@@ -594,7 +647,7 @@ describe('turns and runs', () => {
 
   it('reclaims a queued child run after a worker restart', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const deps = scriptedDeps(store);
     await executeTurn({
       ...deps,
@@ -623,7 +676,7 @@ describe('turns and runs', () => {
 
   it('rejects a root turn for a bot that is not on the channel', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     await expect(
       executeTurn({
         store,
@@ -640,7 +693,7 @@ describe('turns and runs', () => {
 
   it('resumes a running child run after a crash', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const workspace = await store.getWorkspaceForUser(person.id);
     const run = await store.createRun({
       workspaceId: workspace?.id ?? '',
@@ -667,7 +720,7 @@ describe('turns and runs', () => {
 
   it('does not rerun a failed hop', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const workspace = await store.getWorkspaceForUser(person.id);
     const run = await store.createRun({
       workspaceId: workspace?.id ?? '',
@@ -694,8 +747,8 @@ describe('turns and runs', () => {
 
   it('schedules routines on the run channel even when args include another channelId', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
-    const other = { id: 'user-2', email: 'other@example.com', name: 'Other' };
+    await store.upsertUser(person, admins);
+    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
     await store.upsertUser(other, []);
     const workspace = await store.getWorkspaceForUser(person.id);
     const run = await store.createRun({
@@ -733,7 +786,7 @@ describe('turns and runs', () => {
   it('hides another workspace audit trail from the current user', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     expect((await app.request('/api/me', { headers })).status).toBe(200);
     await store.insertAudit({
       actorUserId: 'user-2',
@@ -747,7 +800,7 @@ describe('turns and runs', () => {
 
   it('denies a child tool that is outside the parent envelope', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const workspace = await store.getWorkspaceForUser(person.id);
     expect(workspace).toBeTruthy();
     const run = await store.createRun({
@@ -778,7 +831,7 @@ describe('turns and runs', () => {
 
   it('refuses a fourth delegation hop', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     const workspace = await store.getWorkspaceForUser(person.id);
     const run = await store.createRun({
       workspaceId: workspace?.id ?? '',
@@ -810,8 +863,8 @@ describe('turns and runs', () => {
 describe('capability grants', () => {
   it('refuses a non-owner participant from starting a run that spends owner grants', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
-    await store.upsertUser({ id: 'user-2', email: 'other@example.com', name: 'Other' }, []);
+    await store.upsertUser(person, admins);
+    await store.upsertUser(verifiedPerson('user-2', 'other@example.com', 'Other'), []);
     await store.addChannelParticipant({
       channelId: defaultChannel,
       principalId: 'user-2',
@@ -823,7 +876,7 @@ describe('capability grants', () => {
         store,
         agent: createScriptedAgentRunner(),
         mcpUrl: 'http://mcp.test',
-        user: { id: 'user-2', email: 'other@example.com', isAdmin: false, name: 'Other' },
+        user: { ...verifiedPerson('user-2', 'other@example.com', 'Other'), isAdmin: false },
         channelId: defaultChannel,
         message: 'create an issue on acme/allowed',
       }),
@@ -944,7 +997,7 @@ describe('capability grants', () => {
       granted: true,
       grantedBy: person.id,
     });
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const app = appWith(store);
     const saved = await app.request(`/api/channels/${defaultChannel}/policies`, {
       method: 'PUT',
@@ -1039,7 +1092,7 @@ describe('capability grants', () => {
       granted: false,
       grantedBy: person.id,
     });
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     await store.getUser(person.id);
     const denied = await runGatewayAction({
       store,
@@ -1056,7 +1109,7 @@ describe('capability grants', () => {
 
   it('seeds the GitHub grant when a workspace is created', async () => {
     const store = new MemoryStore();
-    const other = { id: 'user-3', email: 'third@example.com', name: 'Third' };
+    const other = verifiedPerson('user-3', 'third@example.com', 'Third');
     await store.upsertUser(other, []);
     const workspace = await store.getWorkspaceForUser(other.id);
     if (!workspace) {
@@ -1075,7 +1128,7 @@ describe('capability grants', () => {
   it('lists owner connections', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const response = await app.request('/api/admin/connections', { headers });
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -1094,7 +1147,7 @@ describe('projects and channels', () => {
   it('lists the default project and creates another', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const listed = await app.request('/api/projects', { headers });
     expect(listed.status).toBe(200);
     const body = (await listed.json()) as { projects: Array<{ id: string; name: string }> };
@@ -1118,7 +1171,7 @@ describe('projects and channels', () => {
   it('creates a channel in a non-default project', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     await app.request('/api/me', { headers });
     const workspace = await store.getWorkspaceForUser(person.id);
     if (!workspace) {
@@ -1168,9 +1221,9 @@ describe('projects and channels', () => {
   it('rejects a project owned by another workspace', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
-    await store.upsertUser(person, ['admin@example.com']);
-    await store.upsertUser({ id: 'user-2', email: 'other@example.com', name: 'Other' }, []);
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
+    await store.upsertUser(person, admins);
+    await store.upsertUser(verifiedPerson('user-2', 'other@example.com', 'Other'), []);
     const other = await store.getWorkspaceForUser('user-2');
     const created = await app.request('/api/channels', {
       method: 'POST',
@@ -1183,7 +1236,7 @@ describe('projects and channels', () => {
   it('adds a bot participant and refuses a human', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const agent = await app.request('/api/agents', {
       method: 'POST',
       headers,
@@ -1216,7 +1269,7 @@ describe('projects and channels', () => {
   it('archives a channel so it is omitted from the list', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const created = await app.request('/api/channels', {
       method: 'POST',
       headers,
@@ -1238,7 +1291,7 @@ describe('projects and channels', () => {
   it('disables routines on a channel when it is archived', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const created = await app.request('/api/channels', {
       method: 'POST',
       headers,
@@ -1267,13 +1320,13 @@ describe('projects and channels', () => {
   it('does not restore a removed default bot after upsertUser or getUser', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const removed = await app.request(`/api/channels/${defaultChannel}/participants/coder`, {
       method: 'DELETE',
       headers,
     });
     expect(removed.status).toBe(200);
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, admins);
     await store.getUser(person.id);
     const roster = (await (
       await app.request(`/api/channels/${defaultChannel}/participants`, { headers })
@@ -1284,7 +1337,7 @@ describe('projects and channels', () => {
   it('refuses to archive the default General channel', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
-    const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const archived = await app.request(`/api/channels/${defaultChannel}/archive`, {
       method: 'POST',
       headers,
@@ -1298,9 +1351,9 @@ describe('projects and channels', () => {
 
   it('keeps a single workspace per owner after a second upsert', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
-    await store.upsertUser(person, ['admin@example.com']);
-    await store.upsertUser({ id: 'user-2', email: 'other@example.com', name: 'Other' }, []);
+    await store.upsertUser(person, admins);
+    await store.upsertUser(person, admins);
+    await store.upsertUser(verifiedPerson('user-2', 'other@example.com', 'Other'), []);
     const first = await store.getWorkspaceForUser(person.id);
     const second = await store.getWorkspaceForUser('user-2');
     expect(first?.id).not.toBe(second?.id);

@@ -23,8 +23,10 @@ Firebase Auth emulator.
 - Production people auth: Identity Platform.
 - Production agent identity: Cloud Run metadata server / ADC.
 
-The API verifies people tokens the same way in both environments (Firebase Admin).
-The emulator accepts unsigned tokens when the host env var is set.
+The API verifies people tokens the same way in both environments (Firebase Admin),
+then maps `iss` / `aud` / `sub` into an `IdentityKey`. Email is an attribute, not
+the join key. Each backend configures `GABOT_TOKEN_ISSUER` and
+`GABOT_TOKEN_AUDIENCE` and rejects tokens for another audience.
 
 ## Consequences
 

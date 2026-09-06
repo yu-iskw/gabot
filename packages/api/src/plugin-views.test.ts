@@ -4,12 +4,19 @@ import { describe, expect, it } from 'vitest';
 import { getPluginDetail, listPluginViews } from './plugin-views.js';
 import { MemoryStore } from './store/memory-store.js';
 
-const person = { id: 'user-1', email: 'admin@example.com', name: 'Admin' };
+import type { VerifiedPerson } from '@gabot/common';
+
+const person: VerifiedPerson = {
+  id: 'user-1',
+  email: 'admin@example.com',
+  name: 'Admin',
+  identity: { issuer: 'https://id.test/gabot', subject: 'user-1' },
+};
 
 describe('plugin views', () => {
   it('counts tools and workspace grants on the catalogue', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, [person.identity]);
     const workspace = await store.getWorkspaceForUser(person.id);
     if (!workspace) {
       throw new Error('workspace missing');
@@ -27,7 +34,7 @@ describe('plugin views', () => {
 
   it('shows whether the workspace holds each tool', async () => {
     const store = new MemoryStore();
-    await store.upsertUser(person, ['admin@example.com']);
+    await store.upsertUser(person, [person.identity]);
     const workspace = await store.getWorkspaceForUser(person.id);
     if (!workspace) {
       throw new Error('workspace missing');

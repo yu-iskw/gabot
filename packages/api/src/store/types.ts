@@ -4,6 +4,7 @@ import {
   type AuthorityEnvelope,
   type CapabilityGrant,
   type ChannelPolicy,
+  type IdentityKey,
   type OwnerConnection,
   type VerifiedPerson,
 } from '@gabot/common';
@@ -131,10 +132,11 @@ export type RoutineListItem = RoutineRecord & {
 };
 
 export type SessionUser = {
-  id: string;
   email: string;
-  name: string;
+  id: string;
+  identity: IdentityKey;
   isAdmin: boolean;
+  name: string;
 };
 
 export type WorkspaceRecord = {
@@ -222,7 +224,7 @@ export const PROJECT_NOT_FOUND = 'Project not found.';
 export const WORKSPACE_NOT_FOUND = 'Workspace not found.';
 
 export type GabotStore = {
-  upsertUser(person: VerifiedPerson, adminEmails: string[]): Promise<SessionUser>;
+  upsertUser(person: VerifiedPerson, adminIdentities: IdentityKey[]): Promise<SessionUser>;
   listChannels(userId: string): Promise<ChannelRecord[]>;
   getChannel(channelId: string, userId: string): Promise<ChannelRecord | null>;
   updateChannel(channelId: string, patch: ChannelPatch): Promise<ChannelRecord | null>;
