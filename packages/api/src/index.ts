@@ -11,7 +11,9 @@ import { createHttpAgentRunner } from './turns.js';
 const port = Number.parseInt(process.env.PORT ?? '3001', 10);
 const databaseUrl = required(process.env.DATABASE_URL, 'DATABASE_URL');
 const sql = createSql(databaseUrl);
-const store = new PostgresStore(sql);
+const store = new PostgresStore(sql, {
+  workspaceId: process.env.GABOT_WORKSPACE_ID ?? 'ws-gabot',
+});
 const projectId = process.env.FIREBASE_PROJECT_ID ?? 'demo-gabot';
 const issuer = process.env.GABOT_TOKEN_ISSUER ?? `https://securetoken.google.com/${projectId}`;
 const audience = process.env.GABOT_TOKEN_AUDIENCE ?? projectId;

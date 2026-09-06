@@ -3,8 +3,13 @@ import {
   asString,
   matchesToken,
   mcpCapabilityForRef,
-  personalChannelId,
+  membershipCoversWorkspace,
+  membershipIsActive,
+  parseMembershipStatusOrActive,
+  parseWorkspaceRole,
   PROVIDER_MOCK_MCP,
+  workspaceRoleCanAdminister,
+  workspaceRoleCanReadAudit,
 } from '@gabot/common';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -24,7 +29,7 @@ import { executeRun, executeTurn, isTurnClientError } from './turns.js';
 
 import type { AuthVariables } from './auth.js';
 import type { AgentRunner } from './turns.js';
-import type { ActionPolicy, IdentityKey, PeopleAuthPort } from '@gabot/common';
+import type { ActionPolicy, IdentityKey, PeopleAuthPort, WorkspaceRole } from '@gabot/common';
 
 type ApiOptions = {
   store: GabotStore;
@@ -157,26 +162,32 @@ function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     }
   });
   app.get('/api/admin/audit-events', async (context) => {
-    const user = context.get('user');
-    const workspace = await options.store.getWorkspaceForUser(user.id);
+    const access = await requireAuditWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
     const limit = Number(context.req.query('limit') ?? '25');
     return context.json({
       events: await options.store.listAudit(Number.isFinite(limit) ? limit : 25, {
-        actorUserId: user.id,
-        workspaceId: workspace?.id ?? '',
+        actorUserId: context.get('user').id,
+        workspaceId: access.workspace.id,
       }),
     });
   });
   app.get('/api/admin/action-policy', async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
     return context.json({ policy: await options.store.getPolicy() });
   });
   app.put('/api/admin/action-policy', async (context) => {
-    const user = context.get('user');
-    if (!user.isAdmin) {
-      return context.json({ error: FORBIDDEN }, 403);
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
     }
     const policy = readPolicy(await context.req.json());
-    await options.store.setPolicy(policy, user.id);
+    await options.store.setPolicy(policy, context.get('user').id);
     return context.json({ policy });
   });
 }
@@ -212,7 +223,7 @@ function registerChannelMutationRoutes(
     if (!owned.ok) {
       return context.json(owned.body, owned.status);
     }
-    if (owned.channel.id === personalChannelId(context.get('user').id)) {
+    if (owned.channel.id === owned.workspace.defaultChannelId) {
       return context.json({ error: DEFAULT_CHANNEL_LOCKED }, 400);
     }
     await options.store.archiveChannel(owned.channel.id);
@@ -231,15 +242,15 @@ function registerChannelMutationRoutes(
     if (!agentId) {
       return context.json({ error: INVALID_BODY }, 400);
     }
-    const allowed = await botParticipantOrError(options.store, agentId);
+    const allowed = await participantOrError(options.store, agentId);
     if (!allowed.ok) {
       return context.json(allowed.body, allowed.status);
     }
     const participant = {
       channelId: owned.channel.id,
-      principalType: 'bot' as const,
+      principalType: allowed.principalType,
       principalId: agentId,
-      role: 'bot',
+      role: allowed.role,
     };
     await options.store.addChannelParticipant(participant);
     return context.json({ participant }, 201);
@@ -254,13 +265,13 @@ function registerChannelMutationRoutes(
       return context.json(owned.body, owned.status);
     }
     const agentId = context.req.param('agentId');
-    const allowed = await botParticipantOrError(options.store, agentId);
+    const allowed = await participantOrError(options.store, agentId);
     if (!allowed.ok) {
       return context.json(allowed.body, allowed.status);
     }
     const removed = await options.store.removeChannelParticipant({
       channelId: owned.channel.id,
-      principalType: 'bot',
+      principalType: allowed.principalType,
       principalId: agentId,
     });
     if (!removed) {
@@ -420,7 +431,48 @@ function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     return context.json({ ok: true });
   });
   app.get('/api/admin/people', async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
     return context.json({ people: await options.store.listPeople() });
+  });
+  app.get('/api/admin/memberships', async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
+    return context.json({ memberships: await options.store.listMemberships() });
+  });
+  app.put('/api/admin/memberships', async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
+    const body = asRecord(await context.req.json());
+    const userId = asString(body.userId);
+    const role = parseWorkspaceRole(body.role);
+    const status = parseMembershipStatusOrActive(body.status);
+    if (!userId || !role.ok || !status.ok) {
+      return context.json({ error: INVALID_BODY }, 400);
+    }
+    const person = await options.store.getUser(userId);
+    if (!person) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    try {
+      const membership = await options.store.upsertMembership({
+        userId,
+        role: role.value,
+        status: status.value,
+      });
+      return context.json({ membership });
+    } catch (error) {
+      if (error instanceof Error && error.message === WORKSPACE_NOT_FOUND) {
+        return context.json({ error: NOT_FOUND }, 404);
+      }
+      throw error;
+    }
   });
   app.get(`${API_AGENTS}/:id`, async (context) => {
     const agents = await options.store.listAgents();
@@ -522,6 +574,10 @@ async function writeCapabilityGrant(
     return { status: 400, body: { error: 'Invalid grant' } };
   }
   const granted = body.granted !== false;
+  const requestedOwner = asString(body.ownerUserId);
+  if (requestedOwner && requestedOwner !== access.workspace.ownerUserId) {
+    return { status: 404, body: { error: NOT_FOUND } };
+  }
   return persistCapabilityGrant(store, user, access.workspace, {
     provider,
     capability,
@@ -583,7 +639,32 @@ async function requireAdminWorkspace(
   | { ok: true; workspace: WorkspaceRecord }
   | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
 > {
-  if (!user.isAdmin) {
+  return requireRole(store, user, workspaceRoleCanAdminister);
+}
+
+async function requireAuditWorkspace(
+  store: GabotStore,
+  user: SessionUser,
+): Promise<
+  | { ok: true; workspace: WorkspaceRecord }
+  | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
+> {
+  return requireRole(store, user, workspaceRoleCanReadAudit);
+}
+
+async function requireRole(
+  store: GabotStore,
+  user: SessionUser,
+  allowed: (role: WorkspaceRole) => boolean,
+): Promise<
+  | { ok: true; workspace: WorkspaceRecord }
+  | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
+> {
+  const membership = await store.getMembership(user.id);
+  if (!membership || !membershipIsActive(membership)) {
+    return { ok: false, status: 404, body: { error: NOT_FOUND } };
+  }
+  if (!allowed(membership.role)) {
     return { ok: false, status: 403, body: { error: FORBIDDEN } };
   }
   return requireWorkspace(store, user);
@@ -697,9 +778,15 @@ function registerInternalRoutes(
     if (!run) {
       return context.json({ error: INVALID_BODY }, 400);
     }
-    const owner = await options.store.getUser(run.ownerUserId);
+    const [owner, membership] = await Promise.all([
+      options.store.getUser(run.ownerUserId),
+      options.store.getMembership(run.ownerUserId),
+    ]);
     if (!owner) {
       return context.json({ error: INVALID_BODY }, 400);
+    }
+    if (!membershipCoversWorkspace(membership, run.workspaceId)) {
+      return context.json({ error: NOT_FOUND }, 404);
     }
     const result = await executeRun({
       store: options.store,
@@ -722,30 +809,40 @@ async function requireOwnedChannel(
   user: SessionUser,
   channelId: string,
 ): Promise<
-  | { channel: ChannelRecord; ok: true }
-  | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
+  | { channel: ChannelRecord; ok: true; workspace: WorkspaceRecord }
+  | { body: Record<string, unknown>; ok: false; status: 404 }
 > {
   const channel = await store.getChannel(channelId, user.id);
   if (!channel) {
     return { ok: false, status: 404, body: { error: NOT_FOUND } };
   }
-  const scope = await store.getChannelScope(channelId);
-  if (!scope || scope.ownerUserId !== user.id) {
-    return { ok: false, status: 403, body: { error: FORBIDDEN } };
+  const [scope, workspace] = await Promise.all([
+    store.getChannelScope(channelId),
+    store.getWorkspaceForUser(user.id),
+  ]);
+  if (!scope || !workspace || workspace.id !== scope.workspaceId) {
+    return { ok: false, status: 404, body: { error: NOT_FOUND } };
   }
-  return { ok: true, channel };
+  return { ok: true, channel, workspace };
 }
 
-async function botParticipantOrError(
+async function participantOrError(
   store: GabotStore,
-  agentId: string,
-): Promise<{ body: Record<string, unknown>; ok: false; status: 403 | 404 } | { ok: true }> {
-  const agent = await store.getAgent(agentId);
+  principalId: string,
+): Promise<
+  | { ok: true; principalType: 'bot' | 'user'; role: string }
+  | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
+> {
+  const agent = await store.getAgent(principalId);
   if (agent) {
-    return { ok: true };
+    return { ok: true, principalType: 'bot', role: 'bot' };
+  }
+  const membership = await store.getMembership(principalId);
+  if (membership && membershipIsActive(membership)) {
+    return { ok: true, principalType: 'user', role: 'member' };
   }
   const people = await store.listPeople();
-  if (people.some((row) => row.id === agentId)) {
+  if (people.some((row) => row.id === principalId)) {
     return { ok: false, status: 403, body: { error: HUMANS_FORBIDDEN } };
   }
   return { ok: false, status: 404, body: { error: NOT_FOUND } };

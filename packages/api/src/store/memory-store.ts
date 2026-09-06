@@ -11,14 +11,15 @@ import {
   defaultChannelParticipants,
   defaultOwnerConnections,
   defaultOwnerGrants,
+  DEFAULT_WORKSPACE_ID,
   identityKeyEquals,
+  membershipIsActive,
   nextRoutineRun,
   ownerConnectionId,
-  personalChannelId,
-  personalProjectId,
-  personalWorkspaceId,
   PLATFORM_ORG_ID,
   TEAM_BOT_PROFILES,
+  workspaceDefaultChannelId,
+  workspaceProjectId,
 } from '@gabot/common';
 
 import { uniquePolicies } from './channel-policies.js';
@@ -60,7 +61,15 @@ import type {
   WorkRecord,
   WorkspaceRecord,
 } from './types.js';
-import type { ActionPolicy, AuthorityEnvelope, IdentityKey, VerifiedPerson } from '@gabot/common';
+import type {
+  ActionPolicy,
+  AuthorityEnvelope,
+  IdentityKey,
+  MembershipStatus,
+  VerifiedPerson,
+  WorkspaceMembership,
+  WorkspaceRole,
+} from '@gabot/common';
 
 /* eslint-disable @typescript-eslint/require-await -- GabotStore is async for Postgres. */
 
@@ -85,7 +94,9 @@ type WorkspaceRow = {
 };
 
 export class MemoryStore implements GabotStore {
+  private readonly configuredWorkspaceId: string;
   private readonly users = new Map<string, UserRow>();
+  private readonly memberships = new Map<string, WorkspaceMembership>();
   private readonly workspaces = new Map<string, WorkspaceRow>();
   private readonly projects = new Map<string, ProjectRow>();
   private readonly channels = new Map<string, ChannelRow>();
@@ -113,6 +124,10 @@ export class MemoryStore implements GabotStore {
   ];
   private policy: ActionPolicy = { ...DEFAULT_ALLOW_POLICY, deny: [...DEFAULT_ALLOW_POLICY.deny] };
 
+  public constructor(options?: { workspaceId?: string }) {
+    this.configuredWorkspaceId = options?.workspaceId ?? DEFAULT_WORKSPACE_ID;
+  }
+
   public async upsertUser(
     person: VerifiedPerson,
     adminIdentities: IdentityKey[],
@@ -133,12 +148,51 @@ export class MemoryStore implements GabotStore {
     user.identity = person.identity;
     user.isAdmin = isAdmin;
     this.users.set(user.id, user);
-    this.ensurePersonalWorkspace(user);
+    await this.maybeBootstrapAdmin(user, adminIdentities);
     return user;
   }
 
+  public async getMembership(userId: string): Promise<WorkspaceMembership | null> {
+    const row = this.memberships.get(userId);
+    return row ? { ...row } : null;
+  }
+
+  public async listMemberships(): Promise<WorkspaceMembership[]> {
+    return [...this.memberships.values()].map((row) => ({ ...row }));
+  }
+
+  public async upsertMembership(input: {
+    role: WorkspaceRole;
+    status: MembershipStatus;
+    userId: string;
+  }): Promise<WorkspaceMembership> {
+    if (!this.workspaces.has(this.configuredWorkspaceId)) {
+      throw new Error(WORKSPACE_NOT_FOUND);
+    }
+    const membership: WorkspaceMembership = {
+      workspaceId: this.configuredWorkspaceId,
+      userId: input.userId,
+      role: input.role,
+      status: input.status,
+    };
+    this.memberships.set(input.userId, membership);
+    if (membershipIsActive(membership)) {
+      this.rememberParticipant({
+        channelId: workspaceDefaultChannelId(this.configuredWorkspaceId),
+        principalType: 'user',
+        principalId: input.userId,
+        role: input.role === 'admin' ? 'owner' : 'member',
+      });
+    }
+    return { ...membership };
+  }
+
   public async getWorkspaceForUser(userId: string): Promise<WorkspaceRecord | null> {
-    const row = [...this.workspaces.values()].find((item) => item.ownerUserId === userId);
+    const membership = this.memberships.get(userId);
+    if (!membership || !membershipIsActive(membership)) {
+      return null;
+    }
+    const row = this.workspaces.get(this.configuredWorkspaceId);
     if (!row) {
       return null;
     }
@@ -148,7 +202,7 @@ export class MemoryStore implements GabotStore {
       ownerUserId: row.ownerUserId,
       name: row.name,
       projectId: row.projectId,
-      defaultChannelId: personalChannelId(userId),
+      defaultChannelId: workspaceDefaultChannelId(row.id),
     };
   }
 
@@ -394,7 +448,6 @@ export class MemoryStore implements GabotStore {
     if (!user) {
       return null;
     }
-    this.ensurePersonalWorkspace(user);
     return user;
   }
 
@@ -476,7 +529,7 @@ export class MemoryStore implements GabotStore {
     projectId?: string;
     userId: string;
   }): Promise<ChannelRecord> {
-    const workspace = this.workspaces.get(personalWorkspaceId(input.userId));
+    const workspace = await this.getWorkspaceForUser(input.userId);
     if (!workspace) {
       throw new Error(WORKSPACE_NOT_FOUND);
     }
@@ -906,17 +959,34 @@ export class MemoryStore implements GabotStore {
     };
   }
 
-  private ensurePersonalWorkspace(user: SessionUser): void {
-    const workspaceId = personalWorkspaceId(user.id);
-    const projectId = personalProjectId(user.id);
-    const channelId = personalChannelId(user.id);
+  private async maybeBootstrapAdmin(
+    user: SessionUser,
+    adminIdentities: IdentityKey[],
+  ): Promise<void> {
+    const matchesBootstrap = adminIdentities.some((admin) =>
+      identityKeyEquals(admin, user.identity),
+    );
+    const hasActiveAdmin = [...this.memberships.values()].some(
+      (row) => row.role === 'admin' && membershipIsActive(row),
+    );
+    if (!matchesBootstrap || hasActiveAdmin || this.memberships.has(user.id)) {
+      return;
+    }
+    this.ensureBackendWorkspace(user);
+    await this.upsertMembership({ userId: user.id, role: 'admin', status: 'active' });
+  }
+
+  private ensureBackendWorkspace(owner: SessionUser): void {
+    const workspaceId = this.configuredWorkspaceId;
+    const projectId = workspaceProjectId(workspaceId);
+    const channelId = workspaceDefaultChannelId(workspaceId);
     const createdWorkspace = !this.workspaces.has(workspaceId);
     if (createdWorkspace) {
       this.workspaces.set(workspaceId, {
         id: workspaceId,
         organizationId: PLATFORM_ORG_ID,
-        ownerUserId: user.id,
-        name: `${user.name}'s workspace`,
+        ownerUserId: owner.id,
+        name: owner.name,
         projectId,
       });
     }
@@ -936,16 +1006,9 @@ export class MemoryStore implements GabotStore {
         projectId,
         deletedAt: null,
       });
-      this.attachChannelParties(channelId, user.id);
-    } else {
-      this.rememberParticipant({
-        channelId,
-        principalType: 'user',
-        principalId: user.id,
-        role: 'owner',
-      });
+      this.attachChannelParties(channelId, owner.id);
     }
-    this.seedOwnerConnections(workspaceId, user.id, createdWorkspace);
+    this.seedOwnerConnections(workspaceId, owner.id, createdWorkspace);
   }
 
   private seedOwnerConnections(

@@ -48,9 +48,13 @@ Channels still belong to a project. `channel_participants` remains the
 collaboration roster. Humans join through workspace membership, not a
 bot-only participant API. That membership store is issue #8.
 
-`PeopleAuthPort` stays a port ([ADR 0004](0004-identity-ports.md)). Issue #8
-replaces email-keyed `VerifiedPerson` upsert. Prototype helpers such as
-`personalWorkspaceId` stay for the unique-owner code until that issue.
+`personalWorkspaceId` is no longer the API auth path. The membership store
+(`workspace_members`) landed with issue #8: one configured workspace per
+backend (`GABOT_WORKSPACE_ID`), roles `admin | member | auditor`, and
+`status` `active | revoked`. Authorization reads active membership, not
+`workspaces.owner_user_id`. Unique-owner index `workspaces_owner_user_id_uidx`
+is dropped. Connection and run `owner_user_id` stay the credential and
+run-start principals.
 
 ```mermaid
 flowchart LR
@@ -67,7 +71,8 @@ flowchart LR
 
 Two backends may both use `ws-1` / `ch-general` / `coder` without colliding in
 client caches, events, or navigation. Unique-owner SQL
-(`workspaces_owner_user_id_uidx`) and `users.email UNIQUE` are prototype
-invariants, not the target model. Federation helpers in `@gabot/common` fail
-closed. Computer removal is [ADR 0016](0016-built-in-computer-out-of-product-scope.md).
-Schema cutover is [ADR 0017](0017-clean-bootstrap-prototype-is-reference.md).
+(`workspaces_owner_user_id_uidx`) is dropped; the membership store is
+`workspace_members`. `users.email UNIQUE` was already removed. Federation
+helpers in `@gabot/common` fail closed. Computer removal is
+[ADR 0016](0016-built-in-computer-out-of-product-scope.md). Schema cutover is
+[ADR 0017](0017-clean-bootstrap-prototype-is-reference.md).

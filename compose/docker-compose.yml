@@ -129,6 +129,7 @@ services:
       FIREBASE_PROJECT_ID: demo-gabot
       GABOT_TOKEN_ISSUER: https://securetoken.google.com/demo-gabot
       GABOT_TOKEN_AUDIENCE: demo-gabot
+      GABOT_WORKSPACE_ID: ws-gabot
       AGENT_URL: http://agent:4200
       MCP_MOCK_URL: http://mcp-mock:4300
       GABOT_IDENTITY_SECRET: gabot-dev-identity-secret
