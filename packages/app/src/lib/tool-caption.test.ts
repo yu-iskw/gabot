@@ -35,7 +35,7 @@ describe('captionForTool', () => {
   });
 
   it('marks an envelope denial as blocked', () => {
-    expect(captionForTool('Run abc is not authorized to invoke computer_navigate.').refused).toBe(
+    expect(captionForTool('Run abc is not authorized to invoke mcp__mock__echo.').refused).toBe(
       true,
     );
   });

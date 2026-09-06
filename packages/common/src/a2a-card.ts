@@ -33,8 +33,8 @@ export function createMastraAgentCard(url: string): A2AAgentCard {
       {
         id: 'general',
         name: 'General Assistant',
-        description: 'Chat, computer use through the gateway, and granted MCP tools.',
-        tags: ['chat', 'computer'],
+        description: 'Chat and granted MCP tools.',
+        tags: ['chat'],
       },
     ],
   };

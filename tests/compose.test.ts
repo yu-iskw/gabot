@@ -29,17 +29,19 @@ describe('compose contract', () => {
   });
 
   it('publishes secret-bearing ports on loopback only', () => {
-    for (const port of ['5432', '9099', '4400', '4300', '4100', '4500', '4200', '3001', '3010']) {
+    for (const port of ['5432', '9099', '4400', '4300', '4200', '3001', '3010']) {
       expect(compose).toContain(`127.0.0.1:${port}:${port}`);
     }
     expect(compose).not.toMatch(/^\s+- ["']?\d+:\d+/m);
   });
 
-  it('keeps the computer off the data network', () => {
-    const computer = serviceBlock('computer:');
-    expect(computer).not.toEqual('');
-    expect(computer).not.toMatch(/^\s+- data$/m);
-    expect(computer).toContain('Must not list `data`');
+  it('does not define computer or supervisor services', () => {
+    expect(serviceBlock('computer:')).toEqual('');
+    expect(serviceBlock('supervisor:')).toEqual('');
+    expect(compose).not.toContain('COMPUTER_URL');
+    expect(compose).not.toContain('COMPUTER_TOKEN');
+    expect(compose).not.toContain('SUPERVISOR_URL');
+    expect(compose).not.toContain('SUPERVISOR_TOKEN');
     expect(serviceBlock('omni:')).toContain('- data');
     expect(serviceBlock('api:')).toContain('- data');
     expect(serviceBlock('jobs:')).toContain('- data');

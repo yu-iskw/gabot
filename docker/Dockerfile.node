@@ -4,7 +4,6 @@
 #   agent — --functional-type=agent --identity-type=agent-identity
 #   jobs — Cloud Run job
 #   mcp-mock — --functional-type=mcp-server
-#   supervisor — not an agent
 FROM node:24.13.0-bookworm-slim
 RUN corepack enable
 WORKDIR /app

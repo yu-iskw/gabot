@@ -112,14 +112,7 @@ CREATE TABLE IF NOT EXISTS action_policy (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS computer_snapshot (
-  computer_id TEXT PRIMARY KEY,
-  snapshot_id INTEGER NOT NULL,
-  url TEXT NOT NULL,
-  elements JSONB NOT NULL,
-  taken_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  session TEXT
-);
+DROP TABLE IF EXISTS computer_snapshot;
 
 CREATE TABLE IF NOT EXISTS mcp_servers (
   id TEXT PRIMARY KEY,
@@ -484,7 +477,7 @@ VALUES ('general-assistant', 'General Assistant', 'built_in', '{}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO agent_profiles (agent_id, title, role_description, visibility)
-VALUES ('general-assistant', 'General Assistant', 'Helps with governed computer and MCP work.', 'public')
+VALUES ('general-assistant', 'General Assistant', 'Helps with governed MCP work.', 'public')
 ON CONFLICT (agent_id) DO NOTHING;
 
 INSERT INTO agents (id, name, type, configuration)

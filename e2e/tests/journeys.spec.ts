@@ -32,46 +32,31 @@ async function openGeneral(page: Page): Promise<void> {
   await page.getByTestId('channel-general').click();
 }
 
-async function signInAndOpenGeneral(page: Page, watch = false): Promise<void> {
+async function signInAndOpenGeneral(page: Page): Promise<void> {
   await signIn(page);
   await openGeneral(page);
-  if (watch) {
-    await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
-  }
 }
 
-test('signs in, navigates example.com, and records computer audit', async ({ page }) => {
-  await signInAndOpenGeneral(page, true);
-  await page.locator('textarea[name="prompt"]').fill('please navigate to example.com');
-  await page.getByRole('button', { name: 'Send' }).click();
-  await expect(page.getByTestId('assistant-reply')).toContainText(/example.com/i, {
-    timeout: 60_000,
-  });
-  await expect(page.getByTestId('audit-events')).toContainText('Opened');
-});
-
-test('refuses example.com when a deny rule is in force', async ({ page, request }) => {
+test('refuses MCP echo when a deny rule is in force', async ({ page, request }) => {
   const token = await emulatorIdToken();
-  const original = await request.get(`${API}/api/computers/policy`, {
+  const original = await request.get(`${API}/api/admin/action-policy`, {
     headers: { authorization: `Bearer ${token}` },
   });
   const originalBody = (await original.json()) as { policy: unknown };
-  const rule = 'contains(page.host, "example.com")';
-  await request.put(`${API}/api/computers/policy`, {
+  await request.put(`${API}/api/admin/action-policy`, {
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    data: { mode: 'enforce', deny: [rule], allow: ['true'] },
+    data: { mode: 'enforce', deny: ['true'], allow: ['true'] },
   });
   try {
-    await signInAndOpenGeneral(page, true);
-    await page.locator('textarea[name="prompt"]').fill('please navigate to example.com');
+    await signInAndOpenGeneral(page);
+    await page.locator('textarea[name="prompt"]').fill('please echo hello via mcp');
     await page.getByRole('button', { name: 'Send' }).click();
     await expect(page.getByTestId('assistant-reply')).toContainText(/policy|refus/i, {
       timeout: 60_000,
     });
-    await expect(page.getByTestId('audit-events')).toContainText('Blocked');
-    await expect(page.getByTestId('audit-events')).toContainText(/contains\(page\.host/);
+    await expect(page.getByTestId('messages')).toContainText('Blocked');
   } finally {
-    await request.put(`${API}/api/computers/policy`, {
+    await request.put(`${API}/api/admin/action-policy`, {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       data: originalBody.policy,
     });
@@ -87,14 +72,14 @@ test('serves a valid A2A agent card', async ({ request }) => {
 });
 
 test('refuses MCP echo without a grant', async ({ page }) => {
-  await signInAndOpenGeneral(page, true);
+  await signInAndOpenGeneral(page);
   await page.locator('textarea[name="prompt"]').fill('please echo hello via mcp');
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByTestId('assistant-reply')).toContainText(/grant|refus/i, {
     timeout: 60_000,
   });
-  await expect(page.getByTestId('audit-events')).toContainText('Blocked');
-  await expect(page.getByTestId('audit-events')).toContainText(/grant/i);
+  await expect(page.getByTestId('messages')).toContainText('Blocked');
+  await expect(page.getByTestId('messages')).toContainText(/grant/i);
 });
 
 test('a bot can create a bot and it appears on Agents', async ({ page }) => {
@@ -191,13 +176,12 @@ test('grants MCP echo from Plugins so a bot can call it', async ({ page, request
       page.getByRole('switch', { name: 'Grant echo for this workspace' }),
     ).toHaveAttribute('aria-checked', 'true');
     await page.getByTestId('channel-general').click();
-    await page.getByRole('button', { name: "Watch this Bot's screen" }).click();
     await page.locator('textarea[name="prompt"]').fill('please echo hello via mcp');
     await page.getByRole('button', { name: 'Send' }).click();
     await expect(page.getByTestId('assistant-reply')).toContainText(/MCP echo|hello/i, {
       timeout: 60_000,
     });
-    await expect(page.getByTestId('audit-events')).toContainText('Called MCP');
+    await expect(page.getByTestId('messages')).toContainText('Called MCP');
   } finally {
     await request.put(`${API}/api/admin/plugins/mock/grants`, {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },

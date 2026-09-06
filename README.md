@@ -10,7 +10,7 @@ Channels belong to a personal workspace, not a shared global inbox.
 
 - [pnpm](https://pnpm.io/) **11.x** (see `packageManager` in `package.json`; use [Corepack](https://nodejs.org/api/corepack.html): `corepack enable`)
 - Node.js **22+** (see `engines` in `package.json`; `.node-version` pins the version used for local dev and CI)
-- Docker, for the Compose stack (AlloyDB Omni, Auth emulator, API, app, agent, computer)
+- Docker, for the Compose stack (AlloyDB Omni, Auth emulator, API, app, agent)
 
 ### Installation
 
@@ -54,8 +54,6 @@ pnpm format
 - `packages/api`: Hono control plane (gateway, audit, channels)
 - `packages/app`: React UI
 - `packages/agent`: Mastra coworker (AG-UI + A2A card)
-- `packages/computer`: Playwright Chromium computer
-- `packages/supervisor`: Per-bot computer lifecycle
 - `packages/jobs`: Work-queue sweeps
 - `packages/scripted-model`: Deterministic OpenAI-compatible stub
 - `packages/mcp-mock`: Streamable HTTP MCP server for tests

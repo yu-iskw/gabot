@@ -15,7 +15,7 @@ import { runGatewayAction } from './gateway.js';
 import { PROTECTED_AGENT_ID } from './store/types.js';
 
 import type { GabotStore, RunRecord, SessionUser } from './store/types.js';
-import type { AguiRunInput, AguiToolCall, ModelPort, SandboxPort } from '@gabot/common';
+import type { AguiRunInput, AguiToolCall, ModelPort } from '@gabot/common';
 
 type AgentRunInput = AguiRunInput & { botId?: string };
 
@@ -53,15 +53,22 @@ export function createHttpAgentRunner(agentUrl: string): AgentRunner {
   };
 }
 
-type TurnInput = {
+type TurnDeps = {
   agent: AgentRunner;
-  botId?: string;
-  channelId: string;
   mcpUrl: string;
-  message: string;
-  sandbox: SandboxPort;
   store: GabotStore;
   user: SessionUser;
+};
+
+type TurnInput = TurnDeps & {
+  botId?: string;
+  channelId: string;
+  message: string;
+};
+
+type ExecuteRunInput = TurnDeps & {
+  run?: RunRecord;
+  runId: string;
 };
 
 export type TurnResult = {
@@ -152,7 +159,6 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
   });
   return executeRun({
     store: input.store,
-    sandbox: input.sandbox,
     agent: input.agent,
     mcpUrl: input.mcpUrl,
     user: input.user,
@@ -161,15 +167,7 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
   });
 }
 
-export async function executeRun(input: {
-  agent: AgentRunner;
-  mcpUrl: string;
-  run?: RunRecord;
-  runId: string;
-  sandbox: SandboxPort;
-  store: GabotStore;
-  user: SessionUser;
-}): Promise<TurnResult> {
+export async function executeRun(input: ExecuteRunInput): Promise<TurnResult> {
   const run = input.run ?? (await input.store.getRun(input.runId));
   if (!run) {
     throw new Error(`Run ${input.runId} not found.`);
@@ -194,16 +192,7 @@ export async function executeRun(input: {
   }
 }
 
-async function completeRun(
-  input: {
-    agent: AgentRunner;
-    mcpUrl: string;
-    sandbox: SandboxPort;
-    store: GabotStore;
-    user: SessionUser;
-  },
-  run: RunRecord,
-): Promise<TurnResult> {
+async function completeRun(input: TurnDeps, run: RunRecord): Promise<TurnResult> {
   const [threadId, seeded] = await Promise.all([
     input.store.mintThread(run.ownerUserId, run.channelId),
     messagesForRun(input.store, run),
@@ -275,13 +264,7 @@ async function messagesForRun(
 }
 
 async function applyToolCalls(
-  input: {
-    agent: AgentRunner;
-    mcpUrl: string;
-    sandbox: SandboxPort;
-    store: GabotStore;
-    user: SessionUser;
-  },
+  input: TurnDeps,
   run: RunRecord,
   messages: AguiRunInput['messages'],
   calls: AguiToolCall[],
@@ -299,7 +282,6 @@ async function applyToolCalls(
     });
     const result = await runGatewayAction({
       store: input.store,
-      sandbox: input.sandbox,
       mcpUrl: input.mcpUrl,
       actorId: input.user.id,
       botId: run.botId,

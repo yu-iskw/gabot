@@ -16,13 +16,13 @@ export function AdminBoundariesPage() {
   const policy = useQuery({
     queryKey: ['policy'],
     queryFn: async () => {
-      const body = await apiJson<{ policy: Policy }>('/api/computers/policy', await token());
+      const body = await apiJson<{ policy: Policy }>('/api/admin/action-policy', await token());
       return body.policy;
     },
   });
   const save = useMutation({
     mutationFn: async (next: Policy) =>
-      apiJson('/api/computers/policy', await token(), {
+      apiJson('/api/admin/action-policy', await token(), {
         method: 'PUT',
         body: JSON.stringify(next),
       }),
@@ -35,7 +35,7 @@ export function AdminBoundariesPage() {
     <PageShell
       backButton={{ label: 'Admin', to: '/admin' }}
       title="Boundaries"
-      description="CEL expressions that refuse computer actions. One rule per line."
+      description="CEL expressions that refuse tool actions. One rule per line."
     >
       <PageSection title="Deny">
         <Textarea

@@ -25,7 +25,6 @@ import { applyDarkTheme, parseStoredDarkTheme, THEME_STORAGE_KEY } from './lib/t
 import { SignPage } from './login-page.js';
 import { AdminAuditPage } from './pages/admin-audit-page.js';
 import { AdminBoundariesPage } from './pages/admin-boundaries-page.js';
-import { AdminComputersPage } from './pages/admin-computers-page.js';
 import { AdminCredentialsPage } from './pages/admin-credentials-page.js';
 import { AdminIdentityPage } from './pages/admin-identity-page.js';
 import { AdminPage } from './pages/admin-page.js';
@@ -165,11 +164,6 @@ const adminBoundariesRoute = createRoute({
   path: '/admin/boundaries',
   component: AdminBoundariesPage,
 });
-const adminComputersRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/admin/computers',
-  component: AdminComputersPage,
-});
 const adminPluginsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/admin/plugins',
@@ -218,7 +212,6 @@ const routeTree = rootRoute.addChildren([
     adminRoute,
     adminAuditRoute,
     adminBoundariesRoute,
-    adminComputersRoute,
     adminPluginsRoute,
     adminPluginRoute,
     adminPluginToolRoute,

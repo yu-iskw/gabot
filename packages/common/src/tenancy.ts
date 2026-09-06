@@ -16,7 +16,7 @@ export const TEAM_BOT_PROFILES: readonly TeamBotProfile[] = [
     id: GENERAL_ASSISTANT_ID,
     name: 'General Assistant',
     title: 'General Assistant',
-    roleDescription: 'Helps with governed computer and MCP work.',
+    roleDescription: 'Helps with governed MCP work.',
     visibility: 'public',
   },
   {

@@ -10,7 +10,6 @@ import { decideScriptedTurn } from './scripted-turn.js';
 import { botIdentityContent } from './tenancy.js';
 import { matchesToken, offeredBearer } from './token.js';
 import {
-  COMPUTER_NAVIGATE,
   CREATE_BOT,
   CREATE_ROUTINE,
   DELEGATE_TO_BOT,
@@ -28,10 +27,10 @@ describe('AG-UI SSE', () => {
       {
         type: 'TOOL_CALL_START',
         toolCallId: 'c1',
-        toolCallName: COMPUTER_NAVIGATE,
+        toolCallName: MCP_ECHO,
         parentMessageId: 'm',
       },
-      { type: 'TOOL_CALL_ARGS', toolCallId: 'c1', delta: '{"url":"https://example.com"}' },
+      { type: 'TOOL_CALL_ARGS', toolCallId: 'c1', delta: '{"text":"hello"}' },
       { type: 'TOOL_CALL_END', toolCallId: 'c1' },
       { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm', delta: 'hi' },
       { type: 'RUN_FINISHED', threadId: 't', runId: 'r' },
@@ -40,7 +39,7 @@ describe('AG-UI SSE', () => {
     const parsed = parseAguiSse(payload);
     expect(collectText(parsed)).toBe('hi');
     expect(collectToolCalls(parsed)).toEqual([
-      { id: 'c1', name: COMPUTER_NAVIGATE, arguments: { url: 'https://example.com' } },
+      { id: 'c1', name: MCP_ECHO, arguments: { text: 'hello' } },
     ]);
   });
 
@@ -55,9 +54,9 @@ describe('AG-UI SSE', () => {
 });
 
 describe('decideScriptedTurn', () => {
-  it('maps navigate and example.com to a computer tool call', () => {
-    const turn = decideScriptedTurn([{ role: 'user', content: 'please navigate to example.com' }]);
-    expect(turn.toolCalls[0]?.name).toBe(COMPUTER_NAVIGATE);
+  it('maps echo and mcp to a mock MCP tool call', () => {
+    const turn = decideScriptedTurn([{ role: 'user', content: 'please echo hello via mcp' }]);
+    expect(turn.toolCalls[0]?.name).toBe(MCP_ECHO);
   });
 
   it('maps echo to the mock MCP tool', () => {
@@ -68,9 +67,9 @@ describe('decideScriptedTurn', () => {
   it('summarizes a tool result', () => {
     const turn = decideScriptedTurn([
       { role: 'user', content: 'go' },
-      { role: 'tool', content: 'ok', toolName: COMPUTER_NAVIGATE, toolCallId: 'c1' },
+      { role: 'tool', content: 'ok', toolName: MCP_ECHO, toolCallId: 'c1' },
     ]);
-    expect(turn.text).toContain('example.com');
+    expect(turn.text).toContain('MCP echo');
     expect(turn.toolCalls).toHaveLength(0);
   });
 
@@ -109,17 +108,17 @@ describe('decideScriptedTurn', () => {
 
   it('passes through a policy refusal tool result', () => {
     const turn = decideScriptedTurn([
-      { role: 'tool', content: 'refused by policy', toolName: COMPUTER_NAVIGATE, toolCallId: 'c1' },
+      { role: 'tool', content: 'refused by policy', toolName: MCP_ECHO, toolCallId: 'c1' },
     ]);
     expect(turn.text).toContain('refused');
   });
 
   it('starts a new tool call after a previous tool result in history', () => {
     const turn = decideScriptedTurn([
-      { role: 'user', content: 'please navigate to example.com' },
-      { role: 'tool', content: 'Opened https://example.com.', toolName: COMPUTER_NAVIGATE },
-      { role: 'assistant', content: 'Opened https://example.com.' },
       { role: 'user', content: 'please echo hello via mcp' },
+      { role: 'tool', content: 'MCP echo: hello', toolName: MCP_ECHO },
+      { role: 'assistant', content: 'MCP echo: hello' },
+      { role: 'user', content: 'please echo hello via mcp again' },
     ]);
     expect(turn.toolCalls[0]?.name).toBe(MCP_ECHO);
   });
@@ -170,8 +169,8 @@ describe('createOpenAiCompatibleModel', () => {
                   {
                     id: 'c1',
                     function: {
-                      name: COMPUTER_NAVIGATE,
-                      arguments: '{"url":"https://example.com"}',
+                      name: MCP_ECHO,
+                      arguments: '{"text":"hello"}',
                     },
                   },
                 ],
@@ -183,7 +182,7 @@ describe('createOpenAiCompatibleModel', () => {
     vi.stubGlobal('fetch', fetchMock);
     const model = createOpenAiCompatibleModel('http://model/v1');
     const turn = await model.complete({ messages: [{ role: 'user', content: 'go' }], tools: [] });
-    expect(turn.toolCalls[0]?.name).toBe(COMPUTER_NAVIGATE);
+    expect(turn.toolCalls[0]?.name).toBe(MCP_ECHO);
     expect(
       toOpenAiMessages([{ role: 'tool', content: 'x', toolCallId: 'c1', toolName: 't' }])[0],
     ).toMatchObject({
@@ -221,9 +220,7 @@ describe('runModelAsAgui', () => {
       complete: () =>
         Promise.resolve({
           text: '',
-          toolCalls: [
-            { id: 'c1', name: COMPUTER_NAVIGATE, arguments: { url: 'https://example.com' } },
-          ],
+          toolCalls: [{ id: 'c1', name: MCP_ECHO, arguments: { text: 'hello' } }],
         }),
     };
     const events = await runModelAsAgui(model, {
@@ -232,7 +229,7 @@ describe('runModelAsAgui', () => {
       messages: [{ role: 'user', content: 'go' }],
       tools: [],
     });
-    expect(collectToolCalls(events)[0]?.name).toBe(COMPUTER_NAVIGATE);
+    expect(collectToolCalls(events)[0]?.name).toBe(MCP_ECHO);
   });
 });
 

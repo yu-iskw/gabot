@@ -7,8 +7,6 @@ import {
   CAPABILITY_GITHUB_ISSUES_CREATE,
   CAPABILITY_MCP_ECHO,
   COMPONENT_NOTE,
-  COMPUTER_NAVIGATE,
-  COMPUTER_SCREENSHOT,
   CREATE_BOT,
   CREATE_ROUTINE,
   DELEGATE_TO_BOT,
@@ -18,7 +16,6 @@ import {
   matchChannelPolicy,
   MCP_ECHO,
   nextRoutineRun,
-  pageHost,
   RESOURCE_COMPONENT_NOTE,
   RESOURCE_MCP_ECHO,
   runMayInvoke,
@@ -28,13 +25,12 @@ import {
 import { DelegationBudgetError } from './store/types.js';
 
 import type { GabotStore, RoutinePatch, RunRecord } from './store/types.js';
-import type { ComputerActionResult, PolicyContext, SandboxPort } from '@gabot/common';
+import type { PolicyContext } from '@gabot/common';
 
 type GatewayResult = {
   ok: boolean;
   reason: string;
   matched: string | null;
-  result?: ComputerActionResult;
   output: string;
 };
 
@@ -44,9 +40,7 @@ type GatewayInput = {
   botId: string;
   channelId?: string;
   mcpUrl: string;
-  pageUrl?: string;
   run?: RunRecord;
-  sandbox: SandboxPort;
   store: GabotStore;
   toolName: string;
 };
@@ -62,12 +56,11 @@ export async function runGatewayAction(input: GatewayInput): Promise<GatewayResu
     return { ok: false, reason: message, matched: 'authority', output: message };
   }
   const policy = await input.store.getPolicy();
-  const url = asString(input.args.url) || input.pageUrl || '';
-  const context = policyContext(input, url);
+  const context = policyContext(input);
   const decision = evaluateActionPolicy(policy, context);
 
   if (!decision.forward) {
-    await writeAudit(input, 'computer.refused', {
+    await writeAudit(input, 'policy.refused', {
       tool: input.toolName,
       reason: decision.reason,
       rule: decision.matched,
@@ -89,12 +82,6 @@ async function executeAllowed(
   reason: string,
 ): Promise<GatewayResult> {
   switch (input.toolName) {
-    case COMPUTER_NAVIGATE: {
-      return runNavigate(input, matched, reason);
-    }
-    case COMPUTER_SCREENSHOT: {
-      return runScreenshot(input, matched, reason);
-    }
     case MCP_ECHO: {
       return runMcp(input, matched, reason);
     }
@@ -124,36 +111,6 @@ async function executeAllowed(
       return { ok: false, reason: message, matched, output: message };
     }
   }
-}
-
-async function runNavigate(
-  input: GatewayInput,
-  matched: string | null,
-  reason: string,
-): Promise<GatewayResult> {
-  const url = asString(input.args.url);
-  if (!url) {
-    return { ok: false, reason: 'url is required', matched, output: 'url is required' };
-  }
-  const result = await input.sandbox.navigate(input.botId, url);
-  await writeAudit(input, 'computer.navigate', { url, ok: result.ok });
-  const output = result.ok ? `Opened ${result.url ?? url}` : (result.error ?? 'navigate failed');
-  return { ok: result.ok, reason, matched, result, output };
-}
-
-async function runScreenshot(
-  input: GatewayInput,
-  matched: string | null,
-  reason: string,
-): Promise<GatewayResult> {
-  const result = await input.sandbox.screenshot(input.botId);
-  return {
-    ok: result.ok,
-    reason,
-    matched,
-    result,
-    output: result.ok ? 'screenshot' : (result.error ?? 'failed'),
-  };
 }
 
 async function runMcp(
@@ -530,7 +487,7 @@ async function writeAudit(
   await input.store.insertAudit({
     actorUserId: input.actorId,
     eventType,
-    targetType: 'computer',
+    targetType: 'bot',
     targetId: input.botId,
     payload: {
       ...payload,
@@ -563,8 +520,7 @@ function boolArg(value: unknown): boolean | undefined {
   return undefined;
 }
 
-function policyContext(input: GatewayInput, url: string): PolicyContext {
-  const host = pageHost(url);
+function policyContext(input: GatewayInput): PolicyContext {
   const mcp =
     input.toolName === MCP_ECHO
       ? { server: 'mock', tool: 'echo', effect: 'write' as const }
@@ -572,9 +528,9 @@ function policyContext(input: GatewayInput, url: string): PolicyContext {
   return {
     tool: { name: input.toolName },
     bot: { id: input.botId },
-    page: { url, host },
+    page: { url: '', host: '' },
     actor: { id: input.actorId },
-    intent: input.toolName === COMPUTER_NAVIGATE ? 'navigate' : 'write_tool',
+    intent: 'write_tool',
     mcp,
   };
 }

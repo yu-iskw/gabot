@@ -1,21 +1,16 @@
-export type ChannelPane = 'settings' | 'watch';
+export type ChannelPane = 'settings';
 
 type ChannelSearch = {
   settings?: boolean;
-  watch?: boolean;
 };
 
 export function readChannelSearch(search: Record<string, unknown>): ChannelSearch {
   return {
     ...(flagOn(search.settings) ? { settings: true } : {}),
-    ...(flagOn(search.watch) ? { watch: true } : {}),
   };
 }
 
 export function paneFromSearch(search: ChannelSearch): ChannelPane | null {
-  if (search.watch === true) {
-    return 'watch';
-  }
   if (search.settings === true) {
     return 'settings';
   }
@@ -23,9 +18,6 @@ export function paneFromSearch(search: ChannelSearch): ChannelPane | null {
 }
 
 export function searchForPane(next: ChannelPane | null): ChannelSearch {
-  if (next === 'watch') {
-    return { watch: true };
-  }
   if (next === 'settings') {
     return { settings: true };
   }

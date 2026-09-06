@@ -218,31 +218,6 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@4.1.11)(vite@8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))
 
-  packages/computer:
-    dependencies:
-      '@gabot/common':
-        specifier: workspace:*
-        version: link:../common
-      '@hono/node-server':
-        specifier: ^1.19.0
-        version: 1.19.17(hono@4.13.5)
-      hono:
-        specifier: ^4.9.8
-        version: 4.13.5
-      playwright:
-        specifier: 1.62.1
-        version: 1.62.1
-    devDependencies:
-      '@types/node':
-        specifier: ^24.5.2
-        version: 24.13.3
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.11
-        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@4.1.11)(vite@8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))
-
   packages/jobs:
     dependencies:
       '@hono/node-server':
@@ -288,28 +263,6 @@ importers:
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@4.1.11)(vite@8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))
 
   packages/scripted-model:
-    dependencies:
-      '@gabot/common':
-        specifier: workspace:*
-        version: link:../common
-      '@hono/node-server':
-        specifier: ^1.19.0
-        version: 1.19.17(hono@4.13.5)
-      hono:
-        specifier: ^4.9.8
-        version: 4.13.5
-    devDependencies:
-      '@types/node':
-        specifier: ^24.5.2
-        version: 24.13.3
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.11
-        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@4.1.11)(vite@8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))
-
-  packages/supervisor:
     dependencies:
       '@gabot/common':
         specifier: workspace:*

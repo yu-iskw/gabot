@@ -6,6 +6,7 @@ import {
   GITHUB_ALLOWED_REPO,
   GITHUB_CREATE_ISSUE,
   matchesToken,
+  MCP_ECHO,
   personalChannelId,
   PROVIDER_GITHUB,
   PROVIDER_MOCK_MCP,
@@ -22,7 +23,7 @@ import { runGatewayAction } from './gateway.js';
 import { MemoryStore } from './store/memory-store.js';
 import { createScriptedAgentRunner, executeRun, executeTurn } from './turns.js';
 
-import type { PeopleAuthPort, SandboxPort } from '@gabot/common';
+import type { PeopleAuthPort } from '@gabot/common';
 
 const person = { id: 'user-1', email: 'admin@example.com', name: 'Admin' };
 const defaultChannel = personalChannelId(person.id);
@@ -36,26 +37,24 @@ const peopleAuth: PeopleAuthPort = {
   },
 };
 
-function sandbox(navigations: string[]): SandboxPort {
-  return {
-    navigate: (_botId, url) => {
-      navigations.push(url);
-      return Promise.resolve({ ok: true, url, title: 'Example Domain', text: 'Example Domain' });
-    },
-    screenshot: () => Promise.resolve({ ok: true, base64: 'aaaa', width: 800 }),
-  };
-}
-
-function appWith(store: MemoryStore, navigations: string[] = []) {
+function appWith(store: MemoryStore) {
   return createApiApp({
     store,
     peopleAuth,
-    sandbox: sandbox(navigations),
     agent: createScriptedAgentRunner(),
     mcpUrl: 'http://mcp.test',
     workerSecret: 'worker',
     adminEmails: ['admin@example.com'],
   });
+}
+
+function scriptedDeps(store: MemoryStore) {
+  return {
+    store,
+    agent: createScriptedAgentRunner(),
+    mcpUrl: 'http://mcp.test',
+    user: { ...person, isAdmin: true },
+  };
 }
 
 async function ownerRun(store: MemoryStore) {
@@ -129,74 +128,84 @@ describe('control plane', () => {
     expect(await response.json()).toMatchObject({ email: person.email, isAdmin: true });
   });
 
-  it('navigates through the gateway and writes computer audit', async () => {
+  it('reads and writes action policy on the admin route', async () => {
     const store = new MemoryStore();
-    const navigations: string[] = [];
-    const app = appWith(store, navigations);
+    const app = appWith(store);
     const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
-    const response = await app.request('/api/computers/general-assistant/navigate', {
-      method: 'POST',
+    const listed = await app.request('/api/admin/action-policy', { headers });
+    expect(listed.status).toBe(200);
+    const saved = await app.request('/api/admin/action-policy', {
+      method: 'PUT',
       headers,
-      body: JSON.stringify({ url: 'https://example.com' }),
+      body: JSON.stringify({ mode: 'enforce', deny: ['true'], allow: ['true'] }),
     });
-    expect(response.status).toBe(200);
-    expect(navigations).toEqual(['https://example.com']);
-    const trail = await app.request('/api/admin/audit-events?limit=10', { headers });
-    const body = (await trail.json()) as { events: Array<{ eventType: string }> };
-    expect(body.events.some((event) => event.eventType.startsWith('computer.'))).toBe(true);
+    expect(saved.status).toBe(200);
+    const body = (await saved.json()) as { policy: { deny: string[] } };
+    expect(body.policy.deny).toEqual(['true']);
+  });
+
+  it('does not expose computer routes', async () => {
+    const app = appWith(new MemoryStore());
+    const headers = { authorization: 'Bearer good-token' };
+    expect((await app.request('/api/computers', { headers })).status).toBe(404);
+    expect((await app.request('/api/computers/policy', { headers })).status).toBe(404);
+    expect(
+      (await app.request('/api/computers/general-assistant/screenshot', { headers })).status,
+    ).toBe(404);
   });
 
   it('refuses a deny rule and names it in audit', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
     const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
-    await app.request('/api/computers/policy', {
+    await app.request('/api/admin/action-policy', {
       method: 'PUT',
       headers,
       body: JSON.stringify({
         mode: 'enforce',
-        deny: ['contains(page.host, "example.com")'],
+        deny: ['true'],
         allow: ['true'],
       }),
     });
-    const refused = await app.request('/api/computers/general-assistant/navigate', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ url: 'https://example.com' }),
+    const refused = await runGatewayAction({
+      store,
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'general-assistant',
+      toolName: MCP_ECHO,
+      args: { text: 'hello' },
     });
-    expect(refused.status).toBe(403);
+    expect(refused.ok).toBe(false);
     const trail = (await (
       await app.request('/api/admin/audit-events?limit=10', { headers })
     ).json()) as { events: Array<{ eventType: string; payload: { rule?: string } }> };
     const row = trail.events.find((event) => event.eventType.includes('refused'));
-    expect(row?.payload.rule).toContain('example.com');
+    expect(row?.payload.rule).toBe('true');
   });
 
-  it('streams a scripted navigate turn', async () => {
+  it('streams a scripted hello turn', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, ['admin@example.com']);
     const result = await executeTurn({
       store,
-      sandbox: sandbox([]),
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
       channelId: defaultChannel,
-      message: 'please navigate to example.com',
+      message: 'hello',
     });
-    expect(result.toolNames).toContain('computer_navigate');
-    expect(result.text.toLowerCase()).toContain('example.com');
+    expect(result.toolNames).toEqual([]);
+    expect(result.text.toLowerCase()).toContain('gabot');
   });
 
   it('refuses MCP echo without a grant', async () => {
     const store = new MemoryStore();
     const result = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
-      toolName: 'mcp__mock__echo',
+      toolName: MCP_ECHO,
       args: { text: 'hello' },
     });
     expect(result.ok).toBe(false);
@@ -213,7 +222,7 @@ describe('control plane', () => {
     await store.finishWork('handoff', 'a');
   });
 
-  it('covers session, computer, turn, and internal routes', async () => {
+  it('covers session, turn, and internal routes', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
     const headers = { authorization: 'Bearer good-token', 'content-type': 'application/json' };
@@ -241,15 +250,7 @@ describe('control plane', () => {
     expect(participants.status).toBe(200);
     const events = await app.request(`/api/channels/${channelId}/events`, { headers });
     expect(events.status).toBe(200);
-    const shot = await app.request('/api/computers/general-assistant/screenshot', {
-      method: 'POST',
-      headers,
-      body: '{}',
-    });
-    expect(shot.status).toBe(200);
-    const live = await app.request('/api/computers/general-assistant/screenshot', { headers });
-    expect(live.status).toBe(200);
-    const policy = await app.request('/api/computers/policy', { headers });
+    const policy = await app.request('/api/admin/action-policy', { headers });
     expect(policy.status).toBe(200);
     const handoff = await app.request('/api/internal/handoff', {
       method: 'POST',
@@ -282,7 +283,6 @@ describe('control plane', () => {
     const { run } = await ownerRun(store);
     const note = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -293,7 +293,6 @@ describe('control plane', () => {
     expect(note.ok).toBe(true);
     const asked = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -304,7 +303,6 @@ describe('control plane', () => {
     expect(asked.ok).toBe(true);
     const unknown = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -317,7 +315,7 @@ describe('control plane', () => {
   it('reclaims expired work leases and runs due routines', async () => {
     const store = new MemoryStore();
     const past = new Date(Date.now() - 60_000);
-    await store.enqueueWork({ kind: 'computer.cull', key: 'bot-1', payload: {}, runAt: past });
+    await store.enqueueWork({ kind: 'handoff', key: 'bot-1', payload: {}, runAt: past });
     await store.claimWork('dead', 1, new Date(Date.now() - 10 * 60_000));
     const again = await store.claimWork('alive', 1, new Date());
     expect(again).toHaveLength(1);
@@ -344,7 +342,6 @@ describe('control plane', () => {
     await store.upsertUser(person, ['admin@example.com']);
     const result = await executeTurn({
       store,
-      sandbox: sandbox([]),
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
@@ -371,7 +368,6 @@ describe('control plane', () => {
     await store.upsertUser(person, ['admin@example.com']);
     const result = await executeTurn({
       store,
-      sandbox: sandbox([]),
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
@@ -387,7 +383,7 @@ describe('control plane', () => {
     expect((await app.request('/api/skills', { headers })).status).toBe(200);
     expect((await app.request('/api/admin/people', { headers })).status).toBe(200);
     expect((await app.request('/api/admin/plugins', { headers })).status).toBe(200);
-    expect((await app.request('/api/computers', { headers })).status).toBe(200);
+    expect((await app.request('/api/admin/action-policy', { headers })).status).toBe(200);
   });
 
   it('grants an MCP tool so a bot may call it, and revokes it again', async () => {
@@ -483,7 +479,6 @@ describe('control plane', () => {
 
     await executeTurn({
       store,
-      sandbox: sandbox([]),
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
@@ -492,7 +487,6 @@ describe('control plane', () => {
     });
     const updated = await executeTurn({
       store,
-      sandbox: sandbox([]),
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
@@ -523,7 +517,6 @@ describe('turns and runs', () => {
     await store.upsertUser(person, ['admin@example.com']);
     const result = await executeTurn({
       store,
-      sandbox: sandbox([]),
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
@@ -547,7 +540,6 @@ describe('turns and runs', () => {
     expect(removed.status).toBe(200);
     const result = await executeTurn({
       store,
-      sandbox: sandbox([]),
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
@@ -565,7 +557,6 @@ describe('turns and runs', () => {
     await store.upsertUser(person, ['admin@example.com']);
     const result = await executeTurn({
       store,
-      sandbox: sandbox([]),
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
@@ -580,13 +571,7 @@ describe('turns and runs', () => {
   it('delegates monitor to triage to coder through durable child runs', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, ['admin@example.com']);
-    const deps = {
-      store,
-      sandbox: sandbox([]),
-      agent: createScriptedAgentRunner(),
-      mcpUrl: 'http://mcp.test',
-      user: { ...person, isAdmin: true },
-    };
+    const deps = scriptedDeps(store);
     const result = await executeTurn({
       ...deps,
       channelId: defaultChannel,
@@ -610,13 +595,7 @@ describe('turns and runs', () => {
   it('reclaims a queued child run after a worker restart', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, ['admin@example.com']);
-    const deps = {
-      store,
-      sandbox: sandbox([]),
-      agent: createScriptedAgentRunner(),
-      mcpUrl: 'http://mcp.test',
-      user: { ...person, isAdmin: true },
-    };
+    const deps = scriptedDeps(store);
     await executeTurn({
       ...deps,
       channelId: defaultChannel,
@@ -648,7 +627,6 @@ describe('turns and runs', () => {
     await expect(
       executeTurn({
         store,
-        sandbox: sandbox([]),
         agent: createScriptedAgentRunner(),
         mcpUrl: 'http://mcp.test',
         user: { ...person, isAdmin: true },
@@ -678,7 +656,6 @@ describe('turns and runs', () => {
     });
     const result = await executeRun({
       store,
-      sandbox: sandbox([]),
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
@@ -706,7 +683,6 @@ describe('turns and runs', () => {
     });
     const result = await executeRun({
       store,
-      sandbox: sandbox([]),
       agent: createScriptedAgentRunner(),
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
@@ -736,7 +712,6 @@ describe('turns and runs', () => {
     });
     const result = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -762,8 +737,8 @@ describe('turns and runs', () => {
     expect((await app.request('/api/me', { headers })).status).toBe(200);
     await store.insertAudit({
       actorUserId: 'user-2',
-      eventType: 'computer.navigate',
-      targetType: 'computer',
+      eventType: 'mcp.called',
+      targetType: 'bot',
       payload: { workspaceId: 'ws-user-2', url: 'https://secret.example' },
     });
     const trail = await app.request('/api/admin/audit-events?limit=25', { headers });
@@ -783,18 +758,17 @@ describe('turns and runs', () => {
       ownerUserId: person.id,
       triggerType: 'delegation',
       status: 'running',
-      objective: 'navigate',
+      objective: 'echo',
       authority: rootAuthority(['delegate_to_bot']),
       depth: 1,
     });
     const result = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'coder',
-      toolName: 'computer_navigate',
-      args: { url: 'https://example.com' },
+      toolName: MCP_ECHO,
+      args: { text: 'hello' },
       channelId: defaultChannel,
       run,
     });
@@ -820,7 +794,6 @@ describe('turns and runs', () => {
     });
     const result = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'monitor',
@@ -848,7 +821,6 @@ describe('capability grants', () => {
     await expect(
       executeTurn({
         store,
-        sandbox: sandbox([]),
         agent: createScriptedAgentRunner(),
         mcpUrl: 'http://mcp.test',
         user: { id: 'user-2', email: 'other@example.com', isAdmin: false, name: 'Other' },
@@ -863,11 +835,10 @@ describe('capability grants', () => {
     const { run, workspace } = await ownerRun(store);
     const denied = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
-      toolName: 'mcp__mock__echo',
+      toolName: MCP_ECHO,
       args: { text: 'hello' },
       run,
     });
@@ -888,11 +859,10 @@ describe('capability grants', () => {
     vi.stubGlobal('fetch', fetchMock);
     const allowed = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
-      toolName: 'mcp__mock__echo',
+      toolName: MCP_ECHO,
       args: { text: 'hello' },
       run,
     });
@@ -905,7 +875,6 @@ describe('capability grants', () => {
     const { run } = await ownerRun(store);
     const allowed = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -917,7 +886,6 @@ describe('capability grants', () => {
     expect(allowed.output).toContain(GITHUB_ALLOWED_REPO);
     const denied = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -954,7 +922,6 @@ describe('capability grants', () => {
     const { run } = await ownerRun(store);
     const allowed = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -991,7 +958,6 @@ describe('capability grants', () => {
     expect(listed.status).toBe(200);
     const allowed = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -1002,7 +968,6 @@ describe('capability grants', () => {
     expect(allowed.ok).toBe(true);
     const denied = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -1052,7 +1017,6 @@ describe('capability grants', () => {
     expect(githubResources).toEqual(['acme/allowed', 'octo-foo/bar', 'octo/foo-bar']);
     const allowed = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -1079,7 +1043,6 @@ describe('capability grants', () => {
     await store.getUser(person.id);
     const denied = await runGatewayAction({
       store,
-      sandbox: sandbox([]),
       mcpUrl: 'http://mcp.test',
       actorId: person.id,
       botId: 'general-assistant',
@@ -1353,7 +1316,6 @@ describe('projects and channels', () => {
 async function drainRuns(deps: {
   agent: ReturnType<typeof createScriptedAgentRunner>;
   mcpUrl: string;
-  sandbox: ReturnType<typeof sandbox>;
   store: MemoryStore;
   user: { email: string; id: string; isAdmin: boolean; name: string };
 }): Promise<void> {

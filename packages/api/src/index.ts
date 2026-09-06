@@ -5,7 +5,6 @@ import { getAuth } from 'firebase-admin/auth';
 
 import { createApiApp } from './app.js';
 import { createFirebasePeopleAuth } from './auth.js';
-import { createHttpSandbox } from './http-sandbox.js';
 import { createSql, PostgresStore } from './store/postgres-store.js';
 import { createHttpAgentRunner } from './turns.js';
 
@@ -17,10 +16,6 @@ const databaseUrl = required(process.env.DATABASE_URL, 'DATABASE_URL');
 const sql = createSql(databaseUrl);
 const store = new PostgresStore(sql);
 const peopleAuth = createFirebasePeopleAuth(process.env.FIREBASE_PROJECT_ID ?? 'demo-gabot');
-const sandbox = createHttpSandbox(
-  required(process.env.COMPUTER_URL, 'COMPUTER_URL'),
-  required(process.env.COMPUTER_TOKEN, 'COMPUTER_TOKEN'),
-);
 const agent = createHttpAgentRunner(required(process.env.AGENT_URL, 'AGENT_URL'));
 const adminEmails = (process.env.INITIAL_ADMIN_EMAILS ?? 'admin@example.com')
   .split(',')
@@ -57,7 +52,6 @@ await ensureEmulatorAdmin();
 const app = createApiApp({
   store,
   peopleAuth,
-  sandbox,
   agent,
   mcpUrl: process.env.MCP_MOCK_URL ?? 'http://mcp-mock:4300',
   workerSecret: process.env.WORKER_SHARED_SECRET ?? 'gabot-dev-worker-secret',

@@ -1,5 +1,3 @@
-export const COMPUTER_NAVIGATE = 'computer_navigate';
-export const COMPUTER_SCREENSHOT = 'computer_screenshot';
 export const MCP_ECHO = 'mcp__mock__echo';
 export const COMPONENT_NOTE = 'component_note';
 export const ASK_PERSON = 'ask_person';
@@ -8,26 +6,6 @@ export const CREATE_ROUTINE = 'create_routine';
 export const UPDATE_ROUTINE = 'update_routine';
 export const DELEGATE_TO_BOT = 'delegate_to_bot';
 export const GITHUB_CREATE_ISSUE = 'github_create_issue';
-
-export const COMPUTER_TOOLS = [
-  {
-    name: COMPUTER_NAVIGATE,
-    description: 'Open a URL in this Bot computer browser.',
-    parameters: {
-      type: 'object',
-      properties: { url: { type: 'string' } },
-      required: ['url'],
-    },
-  },
-  {
-    name: COMPUTER_SCREENSHOT,
-    description: 'Capture the current page as a PNG.',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
-  },
-] as const;
 
 export const MCP_ECHO_TOOL = {
   name: MCP_ECHO,
@@ -137,7 +115,6 @@ export const GITHUB_CREATE_ISSUE_TOOL = {
 } as const;
 
 export const TURN_TOOLS = [
-  ...COMPUTER_TOOLS,
   MCP_ECHO_TOOL,
   COMPONENT_NOTE_TOOL,
   CREATE_BOT_TOOL,

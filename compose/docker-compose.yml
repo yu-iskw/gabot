@@ -3,9 +3,6 @@
 # Auth emulator listens 0.0.0.0:9099 inside the container. The API uses
 # FIREBASE_AUTH_EMULATOR_HOST=auth:9099. The browser (and Playwright) use
 # localhost:9099 on the published loopback port.
-#
-# The computer must not join the `data` network. Isolation is the container's job:
-# a computer with a shell can reach whatever its network can reach.
 
 services:
   omni:
@@ -91,45 +88,6 @@ services:
       timeout: 5s
       retries: 10
 
-  computer:
-    # Stays on Compose `default` only. Must not list `data` here.
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.computer
-    environment:
-      PORT: 4100
-      COMPUTER_TOKEN: gabot-dev-computer-token
-    ports:
-      - 127.0.0.1:4100:4100
-    healthcheck:
-      test: node -e "fetch('http://127.0.0.1:4100/health').then(r=>process.exit(r.ok?0:1))"
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    shm_size: 1gb
-
-  supervisor:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.node
-      args:
-        PACKAGE: supervisor
-    environment:
-      PORT: 4500
-      SUPERVISOR_TOKEN: gabot-dev-supervisor-token
-      COMPUTER_URL: http://computer:4100
-      COMPUTER_TOKEN: gabot-dev-computer-token
-    ports:
-      - 127.0.0.1:4500:4500
-    depends_on:
-      computer:
-        condition: service_healthy
-    healthcheck:
-      test: node -e "fetch('http://127.0.0.1:4500/health').then(r=>process.exit(r.ok?0:1))"
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   agent:
     build:
       context: ..
@@ -170,10 +128,6 @@ services:
       FIREBASE_AUTH_EMULATOR_HOST: auth:9099
       FIREBASE_PROJECT_ID: demo-gabot
       AGENT_URL: http://agent:4200
-      COMPUTER_URL: http://computer:4100
-      COMPUTER_TOKEN: gabot-dev-computer-token
-      SUPERVISOR_URL: http://supervisor:4500
-      SUPERVISOR_TOKEN: gabot-dev-supervisor-token
       MCP_MOCK_URL: http://mcp-mock:4300
       GABOT_IDENTITY_SECRET: gabot-dev-identity-secret
       KEY_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
@@ -187,8 +141,6 @@ services:
       auth:
         condition: service_healthy
       agent:
-        condition: service_healthy
-      computer:
         condition: service_healthy
       mcp-mock:
         condition: service_healthy
