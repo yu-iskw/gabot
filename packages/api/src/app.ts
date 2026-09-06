@@ -351,6 +351,10 @@ function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     return context.json({ agents: await options.store.listAgents() });
   });
   app.post(API_AGENTS, async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
     const body = asRecord(await context.req.json());
     const name = asString(body.name);
     if (!name) {
@@ -365,6 +369,10 @@ function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     return context.json({ agent }, 201);
   });
   app.patch(`${API_AGENTS}/:id`, async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
     const body = asRecord(await context.req.json());
     const agent = await options.store.updateAgent(context.req.param('id'), {
       name: asString(body.name) || undefined,
@@ -385,6 +393,10 @@ function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     return context.json({ agent });
   });
   app.delete(`${API_AGENTS}/:id`, async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
     const id = context.req.param('id');
     if (id === PROTECTED_AGENT_ID) {
       return context.json({ error: 'Cannot delete the general assistant' }, 409);
@@ -406,6 +418,10 @@ function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     return context.json({ skills: await options.store.listSkills() });
   });
   app.post(API_SKILLS, async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
     const body = asRecord(await context.req.json());
     const slug = asString(body.slug);
     const title = asString(body.title);
@@ -432,6 +448,10 @@ function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     return context.json({ skill });
   });
   app.delete(`${API_SKILLS}/:slug`, async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
     const slug = context.req.param('slug');
     const removed = await options.store.deleteSkill(slug);
     if (!removed) {
