@@ -19,14 +19,3 @@ export type CatalogInvocationFlags = {
 export function invocationAuthorized(flags: CatalogInvocationFlags): boolean {
   return flags.admitted && flags.connected && flags.granted && flags.installed;
 }
-
-export function catalogStageIndex(stage: CatalogStage): number {
-  return CATALOG_STAGES.indexOf(stage);
-}
-
-export function catalogStageReached(
-  completedThrough: CatalogStage,
-  required: CatalogStage,
-): boolean {
-  return catalogStageIndex(completedThrough) >= catalogStageIndex(required);
-}

@@ -30,7 +30,7 @@ explicit deny list.
 
 `optionalAllowFromChannelRows` maps the prototype table onto this algebra:
 no rows become unrestricted, not empty deny. Empty deny is a first-class value
-(`emptyAllowSet`) for later schema.
+(`EMPTY_ALLOW_SET`) for later schema.
 
 Intersect company or deployment mandatory policy, workspace policy, optional
 project/channel restrictions, principal authority, installation, grants, run

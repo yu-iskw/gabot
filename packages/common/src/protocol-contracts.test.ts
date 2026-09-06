@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { catalogStageReached, invocationAuthorized } from './catalog-stage.js';
+import { CATALOG_STAGES, invocationAuthorized } from './catalog-stage.js';
 import {
   apiVersionsCompatible,
   assertEventInScope,
@@ -22,9 +22,8 @@ const HUMAN_IDENTITY = {
 };
 
 describe('catalog stages', () => {
-  it('orders publish through invoke without treating install as grant', () => {
-    expect(catalogStageReached('grant', 'install')).toBe(true);
-    expect(catalogStageReached('install', 'invoke')).toBe(false);
+  it('keeps catalog stages in admission order', () => {
+    expect(CATALOG_STAGES).toEqual(['publish', 'admit', 'install', 'connect', 'grant', 'invoke']);
   });
 
   it('does not authorize invoke from install alone', () => {

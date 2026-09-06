@@ -45,3 +45,20 @@ export function parseRecord(
   }
   return contractOk(value as Record<string, unknown>);
 }
+
+export function parseStringUnion<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  requiredReason: string,
+  invalidReason: string,
+): ContractResult<T> {
+  const raw = parseNonEmptyString(value, requiredReason);
+  if (!raw.ok) {
+    return raw;
+  }
+  const match = allowed.find((item) => item === raw.value);
+  if (match === undefined) {
+    return contractFail(invalidReason);
+  }
+  return contractOk(match);
+}

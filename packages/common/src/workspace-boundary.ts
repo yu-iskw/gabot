@@ -24,27 +24,38 @@ export type BackendBinding = {
   origin: string;
 };
 
-export function parseWorkspaceScope(value: {
-  backendId: unknown;
-  origin: unknown;
-  workspaceId: unknown;
-}): ContractResult<WorkspaceScope> {
-  const origin = parseHttpOrigin(value.origin);
-  if (!origin.ok) {
-    return origin;
-  }
-  const backendId = parseNonEmptyString(value.backendId, 'Backend id is required.');
+export type BackendWorkspaceIds = {
+  backendId: string;
+  workspaceId: string;
+};
+
+export function parseBackendWorkspaceIds(value: object): ContractResult<BackendWorkspaceIds> {
+  const record = value as Record<string, unknown>;
+  const backendId = parseNonEmptyString(record.backendId, 'Backend id is required.');
   if (!backendId.ok) {
     return backendId;
   }
-  const workspaceId = parseNonEmptyString(value.workspaceId, 'Workspace id is required.');
+  const workspaceId = parseNonEmptyString(record.workspaceId, 'Workspace id is required.');
   if (!workspaceId.ok) {
     return workspaceId;
   }
+  return contractOk({ backendId: backendId.value, workspaceId: workspaceId.value });
+}
+
+export function parseWorkspaceScope(value: object): ContractResult<WorkspaceScope> {
+  const record = value as Record<string, unknown>;
+  const origin = parseHttpOrigin(record.origin);
+  if (!origin.ok) {
+    return origin;
+  }
+  const ids = parseBackendWorkspaceIds(record);
+  if (!ids.ok) {
+    return ids;
+  }
   return contractOk({
-    backendId: backendId.value,
+    backendId: ids.value.backendId,
     origin: origin.value,
-    workspaceId: workspaceId.value,
+    workspaceId: ids.value.workspaceId,
   });
 }
 

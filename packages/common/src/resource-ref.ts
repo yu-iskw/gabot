@@ -1,5 +1,5 @@
 import { contractFail, contractOk, parseNonEmptyString, parseRecord } from './contract-result.js';
-import { parseHttpOrigin } from './http-origin.js';
+import { parseWorkspaceScope } from './workspace-boundary.js';
 
 import type { ContractResult } from './contract-result.js';
 
@@ -26,20 +26,19 @@ export type ScopedResourceRef = {
   workspaceId: string;
 };
 
-const BACKEND_REQUIRED = 'Backend id is required.';
 const LOCAL_ID_REQUIRED = 'Local resource id is required.';
 const TYPE_REQUIRED = 'Resource type is required.';
-const WORKSPACE_REQUIRED = 'Workspace id is required.';
 
 export function parseResourceType(value: unknown): ContractResult<ResourceType> {
   const raw = parseNonEmptyString(value, TYPE_REQUIRED);
   if (!raw.ok) {
     return raw;
   }
-  if (!isResourceType(raw.value)) {
+  const match = RESOURCE_TYPES.find((type) => type === raw.value);
+  if (match === undefined) {
     return contractFail(`Resource type ${raw.value} is not supported.`);
   }
-  return contractOk(raw.value);
+  return contractOk(match);
 }
 
 export function parseScopedResourceRef(value: unknown): ContractResult<ScopedResourceRef> {
@@ -47,17 +46,9 @@ export function parseScopedResourceRef(value: unknown): ContractResult<ScopedRes
   if (!record.ok) {
     return record;
   }
-  const origin = parseHttpOrigin(record.value.origin);
-  if (!origin.ok) {
-    return origin;
-  }
-  const backendId = parseNonEmptyString(record.value.backendId, BACKEND_REQUIRED);
-  if (!backendId.ok) {
-    return backendId;
-  }
-  const workspaceId = parseNonEmptyString(record.value.workspaceId, WORKSPACE_REQUIRED);
-  if (!workspaceId.ok) {
-    return workspaceId;
+  const scope = parseWorkspaceScope(record.value);
+  if (!scope.ok) {
+    return scope;
   }
   const resourceType = parseResourceType(record.value.resourceType);
   if (!resourceType.ok) {
@@ -68,16 +59,22 @@ export function parseScopedResourceRef(value: unknown): ContractResult<ScopedRes
     return localId;
   }
   return contractOk({
-    backendId: backendId.value,
+    backendId: scope.value.backendId,
     localId: localId.value,
-    origin: origin.value,
+    origin: scope.value.origin,
     resourceType: resourceType.value,
-    workspaceId: workspaceId.value,
+    workspaceId: scope.value.workspaceId,
   });
 }
 
 export function scopedResourceEquals(left: ScopedResourceRef, right: ScopedResourceRef): boolean {
-  return scopedResourceKey(left) === scopedResourceKey(right);
+  return (
+    left.backendId === right.backendId &&
+    left.localId === right.localId &&
+    left.origin === right.origin &&
+    left.resourceType === right.resourceType &&
+    left.workspaceId === right.workspaceId
+  );
 }
 
 export function scopedResourceKey(ref: ScopedResourceRef): string {
@@ -88,8 +85,4 @@ export function scopedResourceKey(ref: ScopedResourceRef): string {
     encodeURIComponent(ref.resourceType),
     encodeURIComponent(ref.localId),
   ].join('/');
-}
-
-function isResourceType(value: string): value is ResourceType {
-  return RESOURCE_TYPES.some((type) => type === value);
 }

@@ -11,23 +11,15 @@ export type PolicyLayer = {
   allow: AllowSet;
   deny?: readonly string[];
   kind: PolicyLayerKind;
-  name: string;
 };
 
-export type CombinedAllow = { kind: 'allow'; values: readonly string[] } | { kind: 'unrestricted' };
-
 export type CombinedPolicy = {
-  allow: CombinedAllow;
+  allow: AllowSet;
   deny: readonly string[];
 };
 
-export function emptyAllowSet(): AllowSet {
-  return { kind: 'allow', values: [] };
-}
-
-export function unrestrictedAllowSet(): AllowSet {
-  return { kind: 'unrestricted' };
-}
+export const EMPTY_ALLOW_SET: AllowSet = { kind: 'allow', values: [] };
+export const UNRESTRICTED_ALLOW_SET: AllowSet = { kind: 'unrestricted' };
 
 export function allowSet(values: readonly string[]): AllowSet {
   return { kind: 'allow', values: uniqueSorted(values) };
@@ -40,20 +32,20 @@ export function optionalAllowFromChannelRows(
 ): AllowSet {
   const scoped = rows.filter((row) => row.channelId === channelId && row.capability === capability);
   if (scoped.length === 0) {
-    return unrestrictedAllowSet();
+    return UNRESTRICTED_ALLOW_SET;
   }
   return allowSet(scoped.map((row) => row.resource));
 }
 
 export function combinePolicyLayers(layers: readonly PolicyLayer[]): CombinedPolicy {
-  let allow: CombinedAllow = unrestrictedAllowSet();
+  let allow: AllowSet = UNRESTRICTED_ALLOW_SET;
   const deny = new Set<string>();
   for (const layer of layers) {
     addDenyValues(deny, layer.deny);
-    const next = allowSetForLayer(layer);
-    if (next !== undefined) {
-      allow = intersectCombinedAllow(allow, next);
+    if (layer.kind === 'optional' && layer.allow.kind === 'unrestricted') {
+      continue;
     }
+    allow = intersectAllow(allow, layer.allow);
   }
   return { allow, deny: uniqueSorted([...deny]) };
 }
@@ -81,13 +73,6 @@ export function resourcePermitted(
   return contractFail(`Resource ${name} is not in the allowed set.`);
 }
 
-function allowSetForLayer(layer: PolicyLayer): AllowSet | undefined {
-  if (layer.kind === 'optional' && layer.allow.kind === 'unrestricted') {
-    return undefined;
-  }
-  return layer.allow;
-}
-
 function addDenyValues(deny: Set<string>, values: readonly string[] | undefined): void {
   if (values === undefined) {
     return;
@@ -100,7 +85,7 @@ function addDenyValues(deny: Set<string>, values: readonly string[] | undefined)
   }
 }
 
-function intersectCombinedAllow(current: CombinedAllow, next: AllowSet): CombinedAllow {
+function intersectAllow(current: AllowSet, next: AllowSet): AllowSet {
   if (next.kind === 'unrestricted') {
     return current;
   }

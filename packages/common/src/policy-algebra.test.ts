@@ -4,10 +4,10 @@ import { CAPABILITY_GITHUB_ISSUES_CREATE, GITHUB_ALLOWED_REPO } from './capabili
 import {
   allowSet,
   combinePolicyLayers,
-  emptyAllowSet,
+  EMPTY_ALLOW_SET,
   optionalAllowFromChannelRows,
   resourcePermitted,
-  unrestrictedAllowSet,
+  UNRESTRICTED_ALLOW_SET,
 } from './policy-algebra.js';
 import { personalChannelId } from './tenancy.js';
 
@@ -19,12 +19,10 @@ describe('policy algebra', () => {
       {
         allow: allowSet([GITHUB_ALLOWED_REPO, 'acme/other']),
         kind: 'mandatory',
-        name: 'workspace',
       },
       {
-        allow: unrestrictedAllowSet(),
+        allow: UNRESTRICTED_ALLOW_SET,
         kind: 'optional',
-        name: 'channel',
       },
     ]);
     expect(resourcePermitted(combined, GITHUB_ALLOWED_REPO).ok).toBe(true);
@@ -36,12 +34,10 @@ describe('policy algebra', () => {
       {
         allow: allowSet([GITHUB_ALLOWED_REPO]),
         kind: 'mandatory',
-        name: 'workspace',
       },
       {
-        allow: emptyAllowSet(),
+        allow: EMPTY_ALLOW_SET,
         kind: 'optional',
-        name: 'channel',
       },
     ]);
     expect(resourcePermitted(combined, GITHUB_ALLOWED_REPO).ok).toBe(false);
@@ -52,12 +48,10 @@ describe('policy algebra', () => {
       {
         allow: allowSet(['repo-a', 'repo-b']),
         kind: 'mandatory',
-        name: 'company',
       },
       {
         allow: allowSet(['repo-b', 'repo-c']),
         kind: 'optional',
-        name: 'channel',
       },
     ]);
     expect(resourcePermitted(combined, 'repo-b').ok).toBe(true);
@@ -71,7 +65,6 @@ describe('policy algebra', () => {
         allow: allowSet(['repo-a', 'repo-b']),
         deny: ['repo-a'],
         kind: 'mandatory',
-        name: 'workspace',
       },
     ]);
     expect(resourcePermitted(combined, 'repo-a').ok).toBe(false);
@@ -90,7 +83,7 @@ describe('policy algebra', () => {
       CHANNEL_ID,
       CAPABILITY_GITHUB_ISSUES_CREATE,
     );
-    expect(inherit).toEqual(unrestrictedAllowSet());
+    expect(inherit).toEqual(UNRESTRICTED_ALLOW_SET);
     const listed = optionalAllowFromChannelRows(
       [
         {

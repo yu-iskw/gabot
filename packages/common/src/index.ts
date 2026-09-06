@@ -128,13 +128,8 @@ export { asRecord, asString, asStringArray } from './json-value.js';
 export type { ContractResult } from './contract-result.js';
 export { contractFail, contractOk, parseNonEmptyString } from './contract-result.js';
 export { parseHttpOrigin } from './http-origin.js';
-export type { IdentityKey, PersonAttributes } from './identity-key.js';
-export {
-  identityKey,
-  identityKeyEquals,
-  parseIdentityKey,
-  serializeIdentityKey,
-} from './identity-key.js';
+export type { IdentityKey } from './identity-key.js';
+export { identityKeyEquals, parseIdentityKey, serializeIdentityKey } from './identity-key.js';
 export type { ResourceType, ScopedResourceRef } from './resource-ref.js';
 export {
   parseResourceType,
@@ -154,28 +149,17 @@ export {
   parseWorkspaceScope,
   workspaceScopeFromRef,
 } from './workspace-boundary.js';
-export type {
-  AllowSet,
-  CombinedAllow,
-  CombinedPolicy,
-  PolicyLayer,
-  PolicyLayerKind,
-} from './policy-algebra.js';
+export type { AllowSet, CombinedPolicy, PolicyLayer, PolicyLayerKind } from './policy-algebra.js';
 export {
   allowSet,
   combinePolicyLayers,
-  emptyAllowSet,
+  EMPTY_ALLOW_SET,
   optionalAllowFromChannelRows,
   resourcePermitted,
-  unrestrictedAllowSet,
+  UNRESTRICTED_ALLOW_SET,
 } from './policy-algebra.js';
 export type { CatalogInvocationFlags, CatalogStage } from './catalog-stage.js';
-export {
-  CATALOG_STAGES,
-  catalogStageIndex,
-  catalogStageReached,
-  invocationAuthorized,
-} from './catalog-stage.js';
+export { CATALOG_STAGES, invocationAuthorized } from './catalog-stage.js';
 export type {
   AudienceKind,
   ExecutionPrincipal,

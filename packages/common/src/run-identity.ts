@@ -1,5 +1,12 @@
-import { contractFail, contractOk, parseNonEmptyString, parseRecord } from './contract-result.js';
+import {
+  contractFail,
+  contractOk,
+  parseNonEmptyString,
+  parseRecord,
+  parseStringUnion,
+} from './contract-result.js';
 import { parseIdentityKey } from './identity-key.js';
+import { parseBackendWorkspaceIds } from './workspace-boundary.js';
 
 import type { ContractResult } from './contract-result.js';
 import type { IdentityKey } from './identity-key.js';
@@ -33,21 +40,17 @@ export type RunIdentity = {
   workspaceId: string;
 };
 
-const AUDIENCE_KIND_REQUIRED = 'outputAudience.kind is required.';
-const SPONSOR_KIND_REQUIRED = 'accountableSponsor.kind is required.';
+const AUDIENCE_KINDS = ['channel', 'project', 'users'] as const;
+const SPONSOR_KINDS = ['member', 'team'] as const;
 
 export function parseRunIdentity(value: unknown): ContractResult<RunIdentity> {
   const record = parseRecord(value, 'Run identity must be an object.');
   if (!record.ok) {
     return record;
   }
-  const backendId = parseNonEmptyString(record.value.backendId, 'Backend id is required.');
-  if (!backendId.ok) {
-    return backendId;
-  }
-  const workspaceId = parseNonEmptyString(record.value.workspaceId, 'Workspace id is required.');
-  if (!workspaceId.ok) {
-    return workspaceId;
+  const ids = parseBackendWorkspaceIds(record.value);
+  if (!ids.ok) {
+    return ids;
   }
   const initiatedBy = parseInitiatedBy(record.value.initiatedBy);
   if (!initiatedBy.ok) {
@@ -67,11 +70,11 @@ export function parseRunIdentity(value: unknown): ContractResult<RunIdentity> {
   }
   return contractOk({
     accountableSponsor: accountableSponsor.value,
-    backendId: backendId.value,
+    backendId: ids.value.backendId,
     executionPrincipal: executionPrincipal.value,
     initiatedBy: initiatedBy.value,
     outputAudience: outputAudience.value,
-    workspaceId: workspaceId.value,
+    workspaceId: ids.value.workspaceId,
   });
 }
 
@@ -80,25 +83,19 @@ function parseInitiatedBy(value: unknown): ContractResult<RunInitiator> {
   if (!record.ok) {
     return record;
   }
-  const kind = parseNonEmptyString(record.value.kind, 'initiatedBy.kind is required.');
+  const kind = parseStringUnion(
+    record.value.kind,
+    ['external', 'human', 'routine'],
+    'initiatedBy.kind is required.',
+    'initiatedBy.kind is invalid.',
+  );
   if (!kind.ok) {
     return kind;
   }
   if (kind.value === 'routine') {
-    const id = parseNonEmptyString(record.value.id, 'initiatedBy.id is required.');
-    if (!id.ok) {
-      return id;
-    }
-    return contractOk({ id: id.value, kind: 'routine' });
+    return parseIdKind(record.value, kind.value, 'initiatedBy.id is required.');
   }
-  if (kind.value === 'human' || kind.value === 'external') {
-    const identity = parseIdentityKey(record.value.identity);
-    if (!identity.ok) {
-      return identity;
-    }
-    return contractOk({ identity: identity.value, kind: kind.value });
-  }
-  return contractFail('initiatedBy.kind is invalid.');
+  return parseIdentityKind(record.value, kind.value);
 }
 
 function parseExecutionPrincipal(value: unknown): ContractResult<ExecutionPrincipal> {
@@ -106,25 +103,19 @@ function parseExecutionPrincipal(value: unknown): ContractResult<ExecutionPrinci
   if (!record.ok) {
     return record;
   }
-  const kind = parseNonEmptyString(record.value.kind, 'executionPrincipal.kind is required.');
+  const kind = parseStringUnion(
+    record.value.kind,
+    ['user', 'workload'],
+    'executionPrincipal.kind is required.',
+    'executionPrincipal.kind is invalid.',
+  );
   if (!kind.ok) {
     return kind;
   }
   if (kind.value === 'workload') {
-    const id = parseNonEmptyString(record.value.id, 'executionPrincipal.id is required.');
-    if (!id.ok) {
-      return id;
-    }
-    return contractOk({ id: id.value, kind: 'workload' });
+    return parseIdKind(record.value, kind.value, 'executionPrincipal.id is required.');
   }
-  if (kind.value === 'user') {
-    const identity = parseIdentityKey(record.value.identity);
-    if (!identity.ok) {
-      return identity;
-    }
-    return contractOk({ identity: identity.value, kind: 'user' });
-  }
-  return contractFail('executionPrincipal.kind is invalid.');
+  return parseIdentityKind(record.value, kind.value);
 }
 
 function parseSponsor(value: unknown): ContractResult<RunSponsor> {
@@ -132,18 +123,16 @@ function parseSponsor(value: unknown): ContractResult<RunSponsor> {
   if (!record.ok) {
     return record;
   }
-  const kind = parseNonEmptyString(record.value.kind, SPONSOR_KIND_REQUIRED);
+  const kind = parseStringUnion(
+    record.value.kind,
+    SPONSOR_KINDS,
+    'accountableSponsor.kind is required.',
+    'accountableSponsor.kind is invalid.',
+  );
   if (!kind.ok) {
     return kind;
   }
-  if (kind.value !== 'member' && kind.value !== 'team') {
-    return contractFail('accountableSponsor.kind is invalid.');
-  }
-  const id = parseNonEmptyString(record.value.id, 'accountableSponsor.id is required.');
-  if (!id.ok) {
-    return id;
-  }
-  return contractOk({ id: id.value, kind: kind.value });
+  return parseIdKind(record.value, kind.value, 'accountableSponsor.id is required.');
 }
 
 function parseAudience(value: unknown): ContractResult<RunAudience> {
@@ -151,18 +140,43 @@ function parseAudience(value: unknown): ContractResult<RunAudience> {
   if (!record.ok) {
     return record;
   }
-  const kind = parseNonEmptyString(record.value.kind, AUDIENCE_KIND_REQUIRED);
+  const kind = parseStringUnion(
+    record.value.kind,
+    AUDIENCE_KINDS,
+    'outputAudience.kind is required.',
+    'outputAudience.kind is invalid.',
+  );
   if (!kind.ok) {
     return kind;
-  }
-  if (kind.value !== 'channel' && kind.value !== 'project' && kind.value !== 'users') {
-    return contractFail('outputAudience.kind is invalid.');
   }
   const ids = parseIdList(record.value.ids);
   if (!ids.ok) {
     return ids;
   }
   return contractOk({ ids: ids.value, kind: kind.value });
+}
+
+function parseIdKind<T extends string>(
+  record: Record<string, unknown>,
+  kind: T,
+  idReason: string,
+): ContractResult<{ id: string; kind: T }> {
+  const id = parseNonEmptyString(record.id, idReason);
+  if (!id.ok) {
+    return id;
+  }
+  return contractOk({ id: id.value, kind });
+}
+
+function parseIdentityKind<T extends string>(
+  record: Record<string, unknown>,
+  kind: T,
+): ContractResult<{ identity: IdentityKey; kind: T }> {
+  const identity = parseIdentityKey(record.identity);
+  if (!identity.ok) {
+    return identity;
+  }
+  return contractOk({ identity: identity.value, kind });
 }
 
 function parseIdList(value: unknown): ContractResult<readonly string[]> {

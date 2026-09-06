@@ -2,38 +2,39 @@ import { contractFail, contractOk, parseNonEmptyString } from './contract-result
 
 import type { ContractResult } from './contract-result.js';
 
-const ORIGIN_CREDENTIALS = 'Origin must not include credentials.';
 const ORIGIN_PATH = 'Origin must not include a path.';
-const ORIGIN_PROTOCOL = 'Origin must be http or https.';
 const ORIGIN_QUERY = 'Origin must not include query or fragment.';
-const ORIGIN_REQUIRED = 'Origin is required.';
 
-export function parseHttpOrigin(value: unknown): ContractResult<string> {
-  const raw = parseNonEmptyString(value, ORIGIN_REQUIRED);
+export function parseAbsoluteHttpUrl(value: unknown, label: string): ContractResult<URL> {
+  const raw = parseNonEmptyString(value, `${label} is required.`);
   if (!raw.ok) {
     return raw;
   }
-  return originFromUrl(raw.value);
-}
-
-function originFromUrl(value: string): ContractResult<string> {
   let url: URL;
   try {
-    url = new URL(value);
+    url = new URL(raw.value);
   } catch {
-    return contractFail('Origin is not a valid URL.');
+    return contractFail(`${label} is not a valid URL.`);
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return contractFail(ORIGIN_PROTOCOL);
+    return contractFail(`${label} must be http or https.`);
   }
   if (url.username.length > 0 || url.password.length > 0) {
-    return contractFail(ORIGIN_CREDENTIALS);
+    return contractFail(`${label} must not include credentials.`);
   }
-  if (url.search.length > 0 || url.hash.length > 0) {
+  return contractOk(url);
+}
+
+export function parseHttpOrigin(value: unknown): ContractResult<string> {
+  const url = parseAbsoluteHttpUrl(value, 'Origin');
+  if (!url.ok) {
+    return url;
+  }
+  if (url.value.search.length > 0 || url.value.hash.length > 0) {
     return contractFail(ORIGIN_QUERY);
   }
-  if (url.pathname !== '' && url.pathname !== '/') {
+  if (url.value.pathname !== '' && url.value.pathname !== '/') {
     return contractFail(ORIGIN_PATH);
   }
-  return contractOk(url.origin);
+  return contractOk(url.value.origin);
 }

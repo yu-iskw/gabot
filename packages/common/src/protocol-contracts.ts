@@ -1,8 +1,16 @@
-import { contractFail, contractOk, parseNonEmptyString, parseRecord } from './contract-result.js';
+import {
+  contractFail,
+  contractOk,
+  parseNonEmptyString,
+  parseOptionalNonEmptyString,
+  parseRecord,
+  parseStringUnion,
+} from './contract-result.js';
 import { parseScopedResourceRef } from './resource-ref.js';
 import {
   assertBackendOrigin,
   assertSameWorkspaceScope,
+  parseBackendWorkspaceIds,
   parseWorkspaceScope,
   workspaceScopeFromRef,
 } from './workspace-boundary.js';
@@ -57,13 +65,9 @@ export function parseBootstrapDiscovery(value: unknown): ContractResult<Bootstra
   if (!apiVersion.ok) {
     return apiVersion;
   }
-  const backendId = parseNonEmptyString(record.value.backendId, 'Backend id is required.');
-  if (!backendId.ok) {
-    return backendId;
-  }
-  const workspaceId = parseNonEmptyString(record.value.workspaceId, 'Workspace id is required.');
-  if (!workspaceId.ok) {
-    return workspaceId;
+  const ids = parseBackendWorkspaceIds(record.value);
+  if (!ids.ok) {
+    return ids;
   }
   const auth = parseOidcAuth(record.value.auth);
   if (!auth.ok) {
@@ -72,8 +76,8 @@ export function parseBootstrapDiscovery(value: unknown): ContractResult<Bootstra
   return contractOk({
     apiVersion: apiVersion.value,
     auth: auth.value,
-    backendId: backendId.value,
-    workspaceId: workspaceId.value,
+    backendId: ids.value.backendId,
+    workspaceId: ids.value.workspaceId,
   });
 }
 
@@ -140,38 +144,35 @@ export function assertEventInScope(
   return contractFail('Event does not belong to this workspace scope.');
 }
 
+const AUTH_STRING_REASON = 'Discovery auth strings must be non-empty when present.';
+
 function parseOidcAuth(value: unknown): ContractResult<BootstrapDiscovery['auth']> {
   const record = parseRecord(value, 'Discovery auth is required.');
   if (!record.ok) {
     return record;
   }
-  const type = parseNonEmptyString(record.value.type, 'Discovery auth type is required.');
+  const type = parseStringUnion(
+    record.value.type,
+    ['oidc'],
+    'Discovery auth type is required.',
+    'Discovery auth type must be oidc.',
+  );
   if (!type.ok) {
     return type;
   }
-  if (type.value !== 'oidc') {
-    return contractFail('Discovery auth type must be oidc.');
-  }
-  const issuer = optionalAuthString(record.value.issuer);
+  const issuer = parseOptionalNonEmptyString(record.value.issuer, AUTH_STRING_REASON);
   if (!issuer.ok) {
     return issuer;
   }
-  const audience = optionalAuthString(record.value.audience);
+  const audience = parseOptionalNonEmptyString(record.value.audience, AUTH_STRING_REASON);
   if (!audience.ok) {
     return audience;
   }
   return contractOk({
-    type: 'oidc',
+    type: type.value,
     ...(issuer.value === undefined ? {} : { issuer: issuer.value }),
     ...(audience.value === undefined ? {} : { audience: audience.value }),
   });
-}
-
-function optionalAuthString(value: unknown): ContractResult<string | undefined> {
-  if (value === undefined || value === null) {
-    return contractOk(undefined);
-  }
-  return parseNonEmptyString(value, 'Discovery auth strings must be non-empty when present.');
 }
 
 function parseOccurredAt(value: unknown): ContractResult<string> {
