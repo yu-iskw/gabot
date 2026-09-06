@@ -57,5 +57,5 @@ Do not invent company IdP, model, egress, or retention values.
 
 Issue #8 can introduce membership without rewriting unique-owner rows in place.
 CI on `feat` stays until the enterprise line carries the same gates (AC-22).
-The computer deletion slice of #7 has landed. Closing #7 still requires a
-filled checklist for #16, not this ADR alone.
+The computer deletion slice of #7 has landed. The filled pilot checklist still
+belongs to #16, not this ADR.

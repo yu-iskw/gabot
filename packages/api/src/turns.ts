@@ -15,7 +15,7 @@ import { runGatewayAction } from './gateway.js';
 import { PROTECTED_AGENT_ID } from './store/types.js';
 
 import type { GabotStore, RunRecord, SessionUser } from './store/types.js';
-import type { AguiRunInput, AguiToolCall, ModelPort, SandboxPort } from '@gabot/common';
+import type { AguiRunInput, AguiToolCall, ModelPort } from '@gabot/common';
 
 type AgentRunInput = AguiRunInput & { botId?: string };
 
@@ -59,7 +59,6 @@ type TurnInput = {
   channelId: string;
   mcpUrl: string;
   message: string;
-  sandbox: SandboxPort;
   store: GabotStore;
   user: SessionUser;
 };
@@ -152,7 +151,6 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
   });
   return executeRun({
     store: input.store,
-    sandbox: input.sandbox,
     agent: input.agent,
     mcpUrl: input.mcpUrl,
     user: input.user,
@@ -166,7 +164,6 @@ export async function executeRun(input: {
   mcpUrl: string;
   run?: RunRecord;
   runId: string;
-  sandbox: SandboxPort;
   store: GabotStore;
   user: SessionUser;
 }): Promise<TurnResult> {
@@ -198,7 +195,6 @@ async function completeRun(
   input: {
     agent: AgentRunner;
     mcpUrl: string;
-    sandbox: SandboxPort;
     store: GabotStore;
     user: SessionUser;
   },
@@ -278,7 +274,6 @@ async function applyToolCalls(
   input: {
     agent: AgentRunner;
     mcpUrl: string;
-    sandbox: SandboxPort;
     store: GabotStore;
     user: SessionUser;
   },
@@ -299,7 +294,6 @@ async function applyToolCalls(
     });
     const result = await runGatewayAction({
       store: input.store,
-      sandbox: input.sandbox,
       mcpUrl: input.mcpUrl,
       actorId: input.user.id,
       botId: run.botId,

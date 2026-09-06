@@ -1,8 +1,6 @@
 import {
   asRecord,
   asString,
-  COMPUTER_NAVIGATE,
-  COMPUTER_SCREENSHOT,
   matchesToken,
   mcpCapabilityForRef,
   personalChannelId,
@@ -12,7 +10,6 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
 import { requireUser } from './auth.js';
-import { runGatewayAction } from './gateway.js';
 import { getPluginDetail, listPluginViews } from './plugin-views.js';
 import {
   PROTECTED_AGENT_ID,
@@ -27,17 +24,11 @@ import { executeRun, executeTurn, isTurnClientError } from './turns.js';
 
 import type { AuthVariables } from './auth.js';
 import type { AgentRunner } from './turns.js';
-import type {
-  ActionPolicy,
-  ComputerActionResult,
-  PeopleAuthPort,
-  SandboxPort,
-} from '@gabot/common';
+import type { ActionPolicy, PeopleAuthPort } from '@gabot/common';
 
 type ApiOptions = {
   store: GabotStore;
   peopleAuth: PeopleAuthPort;
-  sandbox: SandboxPort;
   agent: AgentRunner;
   mcpUrl: string;
   workerSecret: string;
@@ -69,8 +60,6 @@ export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariabl
   app.use(`${API_CHANNELS}/*`, auth);
   app.use(API_PROJECTS, auth);
   app.use(`${API_PROJECTS}/*`, auth);
-  app.use('/api/computers', auth);
-  app.use('/api/computers/*', auth);
   app.use('/api/admin/*', auth);
   app.use(API_AGENTS, auth);
   app.use(`${API_AGENTS}/*`, auth);
@@ -81,7 +70,6 @@ export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariabl
 
   registerSessionRoutes(app, options);
   registerProductRoutes(app, options);
-  registerComputerRoutes(app, options);
   registerInternalRoutes(app, options);
   return app;
 }
@@ -154,7 +142,6 @@ function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     try {
       const result = await executeTurn({
         store: options.store,
-        sandbox: options.sandbox,
         agent: options.agent,
         mcpUrl: options.mcpUrl,
         user,
@@ -650,78 +637,6 @@ async function persistCapabilityGrant(
   return { status: 200, body: { ok: true, granted: input.granted } };
 }
 
-function registerComputerRoutes(
-  app: Hono<{ Variables: AuthVariables }>,
-  options: ApiOptions,
-): void {
-  app.get('/api/computers', async (context) => {
-    const agents = await options.store.listAgents();
-    return context.json({
-      computers: agents.map((agent) => ({ id: agent.id, name: agent.title })),
-    });
-  });
-  app.get('/api/computers/policy', async (context) => {
-    return context.json({ policy: await options.store.getPolicy() });
-  });
-  app.put('/api/computers/policy', async (context) => {
-    const user = context.get('user');
-    if (!user.isAdmin) {
-      return context.json({ error: FORBIDDEN }, 403);
-    }
-    const policy = readPolicy(await context.req.json());
-    await options.store.setPolicy(policy, user.id);
-    return context.json({ policy });
-  });
-  app.get('/api/computers/:botId/screenshot', async (context) => {
-    const shot = await liveScreenshot(options.sandbox, context.req.param('botId'));
-    return context.json(shot.body, shot.status);
-  });
-  app.post('/api/computers/:botId/navigate', async (context) => {
-    const user = context.get('user');
-    const body = asRecord(await context.req.json());
-    const result = await runGatewayAction({
-      store: options.store,
-      sandbox: options.sandbox,
-      mcpUrl: options.mcpUrl,
-      actorId: user.id,
-      botId: context.req.param('botId'),
-      toolName: COMPUTER_NAVIGATE,
-      args: { url: body.url },
-    });
-    if (!result.ok) {
-      return context.json({ error: result.reason, matched: result.matched }, 403);
-    }
-    return context.json(result.result ?? { ok: true, url: asString(body.url) });
-  });
-  app.post('/api/computers/:botId/screenshot', async (context) => {
-    const user = context.get('user');
-    const result = await runGatewayAction({
-      store: options.store,
-      sandbox: options.sandbox,
-      mcpUrl: options.mcpUrl,
-      actorId: user.id,
-      botId: context.req.param('botId'),
-      toolName: COMPUTER_SCREENSHOT,
-      args: {},
-    });
-    if (!result.ok) {
-      return context.json({ error: result.reason }, 403);
-    }
-    return context.json(result.result ?? { ok: true });
-  });
-}
-
-async function liveScreenshot(
-  sandbox: SandboxPort,
-  botId: string,
-): Promise<{ body: ComputerActionResult | { error: string }; status: 200 | 502 }> {
-  const result = await sandbox.screenshot(botId);
-  if (!result.ok) {
-    return { status: 502, body: { error: result.error ?? 'unavailable' } };
-  }
-  return { status: 200, body: result };
-}
-
 function registerInternalRoutes(
   app: Hono<{ Variables: AuthVariables }>,
   options: ApiOptions,
@@ -763,7 +678,6 @@ function registerInternalRoutes(
     }
     const result = await executeTurn({
       store: options.store,
-      sandbox: options.sandbox,
       agent: options.agent,
       mcpUrl: options.mcpUrl,
       user: owner,
@@ -789,7 +703,6 @@ function registerInternalRoutes(
     }
     const result = await executeRun({
       store: options.store,
-      sandbox: options.sandbox,
       agent: options.agent,
       mcpUrl: options.mcpUrl,
       user: owner,
