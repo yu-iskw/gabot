@@ -7,7 +7,7 @@ import type { PolicyContext } from './policy-types.js';
 
 function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
   return {
-    tool: { name: 'computer_navigate' },
+    tool: { name: 'mcp__mock__echo' },
     bot: { id: 'general-assistant' },
     page: { url: 'https://example.com/', host: 'example.com' },
     actor: { id: 'user-1' },
@@ -114,7 +114,7 @@ describe('evaluateActionPolicy', () => {
     const file = evaluateActionPolicy(
       { mode: 'enforce', deny: ['file.extension == "env"'], allow: ['true'] },
       context({
-        tool: { name: 'computer_read_file' },
+        tool: { name: 'mcp__mock__search' },
         intent: 'read_file',
         file: { path: '.env', name: '.env', extension: 'env' },
       }),

@@ -15,14 +15,12 @@ export { evaluateActionPolicy, pageHost } from './policy.js';
 export type {
   AgentIdentityPort,
   ChatMessage,
-  ComputerActionResult,
   ModelPort,
   ModelToolCall,
   ModelTurn,
   PeopleAuthPort,
   RegistryEntry,
   RegistryPort,
-  SandboxPort,
   VerifiedPerson,
 } from './ports.js';
 export { createLocalAgentIdentity, spiffePrincipal } from './local-identity.js';
@@ -32,9 +30,6 @@ export {
   ASK_PERSON_TOOL,
   COMPONENT_NOTE,
   COMPONENT_NOTE_TOOL,
-  COMPUTER_NAVIGATE,
-  COMPUTER_SCREENSHOT,
-  COMPUTER_TOOLS,
   CREATE_BOT,
   CREATE_BOT_TOOL,
   CREATE_ROUTINE,

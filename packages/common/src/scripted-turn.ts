@@ -1,7 +1,6 @@
 import { parseBotIdentityContent } from './tenancy.js';
 import {
   COMPONENT_NOTE,
-  COMPUTER_NAVIGATE,
   CREATE_BOT,
   CREATE_ROUTINE,
   DELEGATE_TO_BOT,
@@ -11,11 +10,9 @@ import {
 
 import type { ChatMessage, ModelToolCall, ModelTurn } from './ports.js';
 
-const NAVIGATE_EXAMPLE = 'https://example.com';
 const CREATE_BOT_RE = /create (?:a |an )?(?:bot|agent|coworker)/i;
 const SCHEDULE_RE = /\bschedule\b|\broutine\b|every (?:day|hour|minute)/i;
 const MCP_RE = /mcp|echo/i;
-const NAVIGATE_RE = /example\.com|navigate/i;
 const NOTE_RE = /note/i;
 const NAMED_RE = /named\s+([^,.]+)/i;
 
@@ -72,9 +69,6 @@ function matchUserTurn(content: string, botId?: string): ModelTurn {
   }
   if (MCP_RE.test(content)) {
     return call(MCP_ECHO, 'call_mcp', { text: 'hello' });
-  }
-  if (NAVIGATE_RE.test(content)) {
-    return call(COMPUTER_NAVIGATE, 'call_nav', { url: NAVIGATE_EXAMPLE });
   }
   if (NOTE_RE.test(content)) {
     return call(COMPONENT_NOTE, 'call_note', {
@@ -238,9 +232,6 @@ function summarizeTool(message: ChatMessage): string {
   }
   if (message.toolName === MCP_ECHO) {
     return `MCP echo: ${message.content}`;
-  }
-  if (message.toolName === COMPUTER_NAVIGATE) {
-    return `Opened ${NAVIGATE_EXAMPLE}.`;
   }
   if (message.toolName === COMPONENT_NOTE) {
     return 'Rendered the granted note component.';

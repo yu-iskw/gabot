@@ -7,11 +7,11 @@ import {
   rootAuthority,
   runMayInvoke,
 } from './authority.js';
-import { COMPUTER_NAVIGATE, DELEGATE_TO_BOT, MCP_ECHO } from './tool-catalog.js';
+import { CREATE_BOT, DELEGATE_TO_BOT, MCP_ECHO } from './tool-catalog.js';
 
 describe('attenuateAuthority', () => {
   it('intersects requested tools with the parent envelope', () => {
-    const parent = rootAuthority([COMPUTER_NAVIGATE, DELEGATE_TO_BOT, MCP_ECHO]);
+    const parent = rootAuthority([CREATE_BOT, DELEGATE_TO_BOT, MCP_ECHO]);
     const result = attenuateAuthority(parent, [DELEGATE_TO_BOT, MCP_ECHO]);
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -30,10 +30,10 @@ describe('attenuateAuthority', () => {
 
   it('refuses tools the parent did not pass', () => {
     const parent = rootAuthority([DELEGATE_TO_BOT]);
-    const result = attenuateAuthority(parent, [DELEGATE_TO_BOT, COMPUTER_NAVIGATE]);
+    const result = attenuateAuthority(parent, [DELEGATE_TO_BOT, CREATE_BOT]);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toContain(COMPUTER_NAVIGATE);
+      expect(result.reason).toContain(CREATE_BOT);
     }
   });
 });
@@ -42,7 +42,7 @@ describe('runMayInvoke', () => {
   it('allows only listed tools', () => {
     const envelope = rootAuthority([DELEGATE_TO_BOT]);
     expect(runMayInvoke(envelope, DELEGATE_TO_BOT)).toBe(true);
-    expect(runMayInvoke(envelope, COMPUTER_NAVIGATE)).toBe(false);
+    expect(runMayInvoke(envelope, MCP_ECHO)).toBe(false);
   });
 });
 

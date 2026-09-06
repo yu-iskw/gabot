@@ -49,18 +49,3 @@ export type ModelPort = {
     tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
   }): Promise<ModelTurn>;
 };
-
-export type ComputerActionResult = {
-  ok: boolean;
-  url?: string;
-  title?: string;
-  text?: string;
-  base64?: string;
-  width?: number;
-  error?: string;
-};
-
-export type SandboxPort = {
-  navigate(botId: string, url: string): Promise<ComputerActionResult>;
-  screenshot(botId: string): Promise<ComputerActionResult>;
-};
