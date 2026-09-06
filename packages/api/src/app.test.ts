@@ -1477,6 +1477,195 @@ describe('projects and channels', () => {
   });
 });
 
+describe('workspace roles and revocation', () => {
+  async function memberApp() {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
+    await store.upsertUser(person, admins);
+    await store.upsertUser(other, []);
+    await store.upsertMembership({ userId: other.id, role: 'member', status: 'active' });
+    const memberToken = peopleAuth.mintIdToken({
+      subject: other.id,
+      email: other.email,
+      name: other.name,
+    });
+    const memberHeaders = {
+      authorization: `Bearer ${memberToken}`,
+      'content-type': 'application/json',
+    };
+    return { store, app, other, memberHeaders };
+  }
+
+  it('refuses member writes to policy membership and grants', async () => {
+    const { app, other, memberHeaders } = await memberApp();
+    const policy = await app.request('/api/admin/action-policy', {
+      method: 'PUT',
+      headers: memberHeaders,
+      body: JSON.stringify({ mode: 'enforce', deny: [], allow: ['true'] }),
+    });
+    expect(policy.status).toBe(403);
+    const membership = await app.request('/api/admin/memberships', {
+      method: 'PUT',
+      headers: memberHeaders,
+      body: JSON.stringify({ userId: other.id, role: 'admin' }),
+    });
+    expect(membership.status).toBe(403);
+    const grant = await app.request('/api/admin/capability-grants', {
+      method: 'PUT',
+      headers: memberHeaders,
+      body: JSON.stringify({
+        provider: PROVIDER_GITHUB,
+        capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+        resource: GITHUB_ALLOWED_REPO,
+        ownerUserId: other.id,
+      }),
+    });
+    expect(grant.status).toBe(403);
+    expect((await app.request('/api/admin/people', { headers: memberHeaders })).status).toBe(403);
+  });
+
+  it('lets an auditor read audit and refuses grant writes', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const auditor = verifiedPerson('user-2', 'auditor@example.com', 'Auditor');
+    await store.upsertUser(person, admins);
+    await store.upsertUser(auditor, []);
+    await store.upsertMembership({ userId: auditor.id, role: 'auditor', status: 'active' });
+    const token = peopleAuth.mintIdToken({
+      subject: auditor.id,
+      email: auditor.email,
+      name: auditor.name,
+    });
+    const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    expect((await app.request('/api/admin/audit-events', { headers })).status).toBe(200);
+    const grant = await app.request('/api/admin/capability-grants', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        provider: PROVIDER_GITHUB,
+        capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+        resource: GITHUB_ALLOWED_REPO,
+      }),
+    });
+    expect(grant.status).toBe(403);
+  });
+
+  it('does not let a member spend or re-grant another member owner connection', async () => {
+    const { store, app, other } = await memberApp();
+    const workspace = await store.getWorkspaceForUser(person.id);
+    if (!workspace) {
+      throw new Error('workspace missing');
+    }
+    const run = await store.createRun({
+      workspaceId: workspace.id,
+      projectId: workspace.projectId,
+      channelId: defaultChannel,
+      botId: 'general-assistant',
+      ownerUserId: other.id,
+      triggerType: 'interactive',
+      status: 'running',
+      objective: 'issue',
+      authority: rootAuthority(TURN_TOOL_NAMES),
+      depth: 0,
+    });
+    const denied = await runGatewayAction({
+      store,
+      mcpUrl: 'http://mcp.test',
+      actorId: other.id,
+      botId: 'general-assistant',
+      toolName: GITHUB_CREATE_ISSUE,
+      args: { repo: GITHUB_ALLOWED_REPO, title: 'Outage' },
+      run,
+    });
+    expect(denied.ok).toBe(false);
+    await expect(
+      store.setCapabilityGrant({
+        workspaceId: workspace.id,
+        ownerUserId: other.id,
+        provider: PROVIDER_GITHUB,
+        capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+        resource: GITHUB_ALLOWED_REPO,
+        granted: true,
+        grantedBy: other.id,
+      }),
+    ).rejects.toThrow(/Connection not found/);
+    const stolen = await app.request('/api/admin/capability-grants', {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: PROVIDER_GITHUB,
+        capability: CAPABILITY_GITHUB_ISSUES_CREATE,
+        resource: 'acme/other',
+        ownerUserId: other.id,
+      }),
+    });
+    expect(stolen.status).toBe(404);
+  });
+
+  it('refuses revoked members from starting or executing runs', async () => {
+    const { store, other } = await memberApp();
+    await store.upsertMembership({ userId: other.id, role: 'member', status: 'revoked' });
+    await expect(
+      executeTurn({
+        store,
+        agent: createScriptedAgentRunner(),
+        mcpUrl: 'http://mcp.test',
+        user: { ...other, isAdmin: false },
+        channelId: defaultChannel,
+        message: 'hello',
+      }),
+    ).rejects.toThrow(/membership/);
+    const { run } = await ownerRun(store);
+    await store.upsertMembership({ userId: person.id, role: 'admin', status: 'revoked' });
+    await expect(
+      executeRun({
+        store,
+        agent: createScriptedAgentRunner(),
+        mcpUrl: 'http://mcp.test',
+        user: { ...person, isAdmin: true },
+        runId: run.id,
+        run,
+      }),
+    ).rejects.toThrow(/membership/);
+    const app = appWith(store);
+    const executed = await app.request('/api/internal/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': 'worker' },
+      body: JSON.stringify({ runId: run.id }),
+    });
+    expect(executed.status).toBe(404);
+    expect((await store.getRun(run.id))?.ownerUserId).toBe(person.id);
+  });
+
+  it('does not grant admin to a different subject that shares an email', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const twin = verifiedPerson('user-twin', person.email, 'Twin');
+    await store.upsertUser(person, admins);
+    await store.upsertUser(twin, admins);
+    expect(await store.getMembership(twin.id)).toBeNull();
+    const token = peopleAuth.mintIdToken({
+      subject: twin.id,
+      email: twin.email,
+      name: twin.name,
+    });
+    const headers = { authorization: `Bearer ${token}` };
+    expect((await app.request('/api/admin/people', { headers })).status).toBe(404);
+    expect((await app.request('/api/admin/action-policy', { headers })).status).toBe(404);
+  });
+
+  it('hides a foreign channel id with 404', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: `Bearer ${goodToken}` };
+    const missing = await app.request('/api/channels/ch-foreign-general/messages', { headers });
+    expect(missing.status).toBe(404);
+    const body = (await missing.json()) as { error?: string };
+    expect(body.error).toBe('Not found');
+  });
+});
+
 async function drainRuns(deps: {
   agent: ReturnType<typeof createScriptedAgentRunner>;
   mcpUrl: string;

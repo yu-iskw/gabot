@@ -116,6 +116,8 @@ export {
   parseMembershipStatusOrActive,
   parseWorkspaceRole,
   WORKSPACE_ROLES,
+  workspaceRoleCanAdminister,
+  workspaceRoleCanReadAudit,
 } from './workspace-membership.js';
 export type {
   MembershipStatus,

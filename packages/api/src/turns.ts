@@ -183,6 +183,14 @@ export async function executeRun(input: ExecuteRunInput): Promise<TurnResult> {
   if (run.status === 'succeeded' || run.status === 'cancelled' || run.status === 'failed') {
     return { runId: run.id, text: '', toolNames: [] };
   }
+  const membership = await input.store.getMembership(input.user.id);
+  if (
+    !membership ||
+    !membershipIsActive(membership) ||
+    membership.workspaceId !== run.workspaceId
+  ) {
+    throw new TurnClientError('Active workspace membership is required to execute this run.');
+  }
   await input.store.updateRunStatus(run.id, 'running');
   try {
     return await completeRun(input, run);

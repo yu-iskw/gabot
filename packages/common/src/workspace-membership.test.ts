@@ -5,6 +5,8 @@ import {
   parseMembershipStatus,
   parseMembershipStatusOrActive,
   parseWorkspaceRole,
+  workspaceRoleCanAdminister,
+  workspaceRoleCanReadAudit,
 } from './workspace-membership.js';
 
 describe('parseWorkspaceRole', () => {
@@ -48,5 +50,16 @@ describe('membershipIsActive', () => {
         status: 'revoked',
       }),
     ).toBe(false);
+  });
+});
+
+describe('workspace roles', () => {
+  it('lets admin administer and auditor read audit only', () => {
+    expect(workspaceRoleCanAdminister('admin')).toBe(true);
+    expect(workspaceRoleCanAdminister('member')).toBe(false);
+    expect(workspaceRoleCanAdminister('auditor')).toBe(false);
+    expect(workspaceRoleCanReadAudit('admin')).toBe(true);
+    expect(workspaceRoleCanReadAudit('auditor')).toBe(true);
+    expect(workspaceRoleCanReadAudit('member')).toBe(false);
   });
 });
