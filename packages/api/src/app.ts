@@ -168,6 +168,7 @@ function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options:
         channelId,
         message: asString(body.message),
         botId: asString(body.botId) || undefined,
+        triggerType: 'interactive',
       });
       const payload = `data: ${JSON.stringify({ type: 'text', delta: result.text, toolNames: result.toolNames })}\n\ndata: ${JSON.stringify({ type: 'done' })}\n\n`;
       return context.body(payload, 200, { 'content-type': 'text/event-stream' });
@@ -790,6 +791,7 @@ function registerInternalRoutes(
       channelId: channel.id,
       message: instruction,
       botId: agentId,
+      triggerType: 'routine',
     });
     return context.json({ ok: true, text: result.text });
   });

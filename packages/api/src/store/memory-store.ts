@@ -56,6 +56,7 @@ import type {
   RoutineRecord,
   RunRecord,
   RunStatus,
+  RunTriggerType,
   SessionUser,
   SkillRecord,
   WorkRecord,
@@ -668,7 +669,7 @@ export class MemoryStore implements GabotStore {
     projectId: string;
     rootRunId?: string;
     status: RunStatus;
-    triggerType: string;
+    triggerType: RunTriggerType;
     workspaceId: string;
   }): Promise<RunRecord> {
     const id = input.id ?? randomUUID();

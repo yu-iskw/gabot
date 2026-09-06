@@ -282,6 +282,7 @@ describe('control plane', () => {
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
       channelId: defaultChannel,
+      triggerType: 'interactive',
       message: 'hello',
     });
     expect(result.toolNames).toEqual([]);
@@ -436,6 +437,7 @@ describe('control plane', () => {
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
       channelId: defaultChannel,
+      triggerType: 'interactive',
       message: 'please create a bot named Research',
     });
     expect(result.toolNames).toContain('create_bot');
@@ -462,6 +464,7 @@ describe('control plane', () => {
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
       channelId: defaultChannel,
+      triggerType: 'interactive',
       message: 'schedule a task every minute to say hello',
     });
     expect(result.toolNames).toContain('create_routine');
@@ -573,6 +576,7 @@ describe('control plane', () => {
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
       channelId: defaultChannel,
+      triggerType: 'interactive',
       message: 'schedule a task every minute to say hello',
     });
     const updated = await executeTurn({
@@ -581,6 +585,7 @@ describe('control plane', () => {
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
       channelId: defaultChannel,
+      triggerType: 'interactive',
       message: 'change the say hello routine to say hi',
     });
     expect(updated.toolNames).toContain('update_routine');
@@ -616,6 +621,7 @@ describe('turns and runs', () => {
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
       channelId: defaultChannel,
+      triggerType: 'interactive',
       message: 'hello',
     });
     const run = await store.getRun(result.runId);
@@ -639,6 +645,7 @@ describe('turns and runs', () => {
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
       channelId: defaultChannel,
+      triggerType: 'interactive',
       message: 'hello',
     });
     const run = await store.getRun(result.runId);
@@ -656,6 +663,7 @@ describe('turns and runs', () => {
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
       channelId: defaultChannel,
+      triggerType: 'interactive',
       message: '@monitor inspect production errors from the last 24 hours',
     });
     const run = await store.getRun(result.runId);
@@ -672,6 +680,7 @@ describe('turns and runs', () => {
       channelId: defaultChannel,
       botId: 'monitor',
       message: 'inspect production errors from the last 24 hours',
+      triggerType: 'interactive',
     });
     expect(result.toolNames).toContain('delegate_to_bot');
     await drainRuns(deps);
@@ -696,6 +705,7 @@ describe('turns and runs', () => {
       channelId: defaultChannel,
       botId: 'monitor',
       message: 'inspect production errors from the last 24 hours',
+      triggerType: 'interactive',
     });
     const lost = await store.claimWork('dead', 10);
     expect(lost[0]?.kind).toBe('run.execute');
@@ -728,6 +738,7 @@ describe('turns and runs', () => {
         channelId: defaultChannel,
         botId: 'stranger',
         message: 'hello',
+        triggerType: 'interactive',
       }),
     ).rejects.toThrow('not a participant');
     expect(await store.listMessages(defaultChannel)).toHaveLength(0);
@@ -922,6 +933,7 @@ describe('capability grants', () => {
         user: { ...other, isAdmin: false },
         channelId: defaultChannel,
         message: 'create an issue on acme/allowed',
+        triggerType: 'interactive',
       }),
     ).rejects.toThrow(/membership/);
   });
@@ -939,6 +951,7 @@ describe('capability grants', () => {
       user: { ...other, isAdmin: false },
       channelId: defaultChannel,
       message: 'hello',
+      triggerType: 'interactive',
     });
     const run = await store.getRun(result.runId);
     expect(run?.ownerUserId).toBe(other.id);
@@ -1688,6 +1701,7 @@ describe('workspace roles and revocation', () => {
         user: { ...other, isAdmin: false },
         channelId: defaultChannel,
         message: 'hello',
+        triggerType: 'interactive',
       }),
     ).rejects.toThrow(/membership/);
     const { run } = await ownerRun(store);

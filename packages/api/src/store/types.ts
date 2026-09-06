@@ -185,6 +185,8 @@ export type ChannelEventRecord = {
 
 export type RunStatus = 'cancelled' | 'failed' | 'queued' | 'running' | 'succeeded';
 
+export type RunTriggerType = 'delegation' | 'interactive' | 'routine';
+
 export type RunRecord = {
   authority: AuthorityEnvelope;
   botId: string;
@@ -369,7 +371,7 @@ export type GabotStore = {
     projectId: string;
     rootRunId?: string;
     status: RunStatus;
-    triggerType: string;
+    triggerType: RunTriggerType;
     workspaceId: string;
   }): Promise<RunRecord>;
   getRun(runId: string): Promise<RunRecord | null>;
