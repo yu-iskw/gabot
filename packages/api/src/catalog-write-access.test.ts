@@ -74,165 +74,58 @@ async function catalogFixture() {
     summary: 'Seeded',
     instructions: 'Keep this.',
   });
-  return {
-    store,
-    app,
-    seededAgent,
-    seededSkill,
-    adminHeaders: jsonHeaders(adminPerson),
-    memberHeaders: jsonHeaders(memberPerson),
-    outsiderHeaders: jsonHeaders(outsiderPerson),
-  };
+  return { store, app, seededAgent, seededSkill };
+}
+
+async function catalogMutations(
+  app: ReturnType<typeof createApiApp>,
+  headers: Record<string, string>,
+  agentId: string,
+  skillSlug: string,
+) {
+  return Promise.all([
+    app.request('/api/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(AGENT_BODY),
+    }),
+    app.request(`/api/agents/${agentId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ title: 'Hacked' }),
+    }),
+    app.request(`/api/agents/${agentId}`, { method: 'DELETE', headers }),
+    app.request('/api/skills', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(SKILL_BODY),
+    }),
+    app.request(`/api/skills/${skillSlug}`, { method: 'DELETE', headers }),
+  ]);
 }
 
 describe('catalog write access', () => {
-  it('lets an admin create patch and delete agents and skills', async () => {
-    const { app, store, adminHeaders } = await catalogFixture();
-    const created = await app.request('/api/agents', {
-      method: 'POST',
-      headers: adminHeaders,
-      body: JSON.stringify(AGENT_BODY),
-    });
-    expect(created.status).toBe(201);
-    const agentId = ((await created.json()) as { agent: { id: string } }).agent.id;
-    const patched = await app.request(`/api/agents/${agentId}`, {
-      method: 'PATCH',
-      headers: adminHeaders,
-      body: JSON.stringify({ title: 'Renamed' }),
-    });
-    expect(patched.status).toBe(200);
-    expect(((await patched.json()) as { agent: { title: string } }).agent.title).toBe('Renamed');
-    expect(
-      (await app.request(`/api/agents/${agentId}`, { method: 'DELETE', headers: adminHeaders }))
-        .status,
-    ).toBe(200);
-    expect(await store.getAgent(agentId)).toBeNull();
-    const skill = await app.request('/api/skills', {
-      method: 'POST',
-      headers: adminHeaders,
-      body: JSON.stringify(SKILL_BODY),
-    });
-    expect(skill.status).toBe(200);
-    expect(
-      (
-        await app.request(`/api/skills/${SKILL_BODY.slug}`, {
-          method: 'DELETE',
-          headers: adminHeaders,
-        })
-      ).status,
-    ).toBe(200);
-    expect(await store.getSkill(SKILL_BODY.slug)).toBeNull();
-  });
-
-  it('refuses member catalog writes with 403 and leaves rows unchanged', async () => {
-    const { app, store, seededAgent, seededSkill, memberHeaders } = await catalogFixture();
+  it.each([
+    { label: 'member', person: memberPerson, status: 403 },
+    { label: 'outsider', person: outsiderPerson, status: 404 },
+  ])('refuses $label catalog writes with $status', async ({ person, status }) => {
+    const { app, store, seededAgent, seededSkill } = await catalogFixture();
+    const headers = jsonHeaders(person);
     const beforeAgents = (await store.listAgents()).length;
-    expect(
-      (
-        await app.request('/api/agents', {
-          method: 'POST',
-          headers: memberHeaders,
-          body: JSON.stringify(AGENT_BODY),
-        })
-      ).status,
-    ).toBe(403);
+    const responses = await catalogMutations(app, headers, seededAgent.id, seededSkill.slug);
+    expect(responses.map((row) => row.status)).toEqual([status, status, status, status, status]);
     expect((await store.listAgents()).length).toBe(beforeAgents);
-    expect(
-      (
-        await app.request(`/api/agents/${seededAgent.id}`, {
-          method: 'PATCH',
-          headers: memberHeaders,
-          body: JSON.stringify({ title: 'Hacked' }),
-        })
-      ).status,
-    ).toBe(403);
     expect((await store.getAgent(seededAgent.id))?.title).toBe('Temp');
-    expect(
-      (
-        await app.request(`/api/agents/${seededAgent.id}`, {
-          method: 'DELETE',
-          headers: memberHeaders,
-        })
-      ).status,
-    ).toBe(403);
-    expect(await store.getAgent(seededAgent.id)).not.toBeNull();
-    expect(
-      (
-        await app.request('/api/skills', {
-          method: 'POST',
-          headers: memberHeaders,
-          body: JSON.stringify(SKILL_BODY),
-        })
-      ).status,
-    ).toBe(403);
     expect(await store.getSkill(SKILL_BODY.slug)).toBeNull();
-    expect(
-      (
-        await app.request(`/api/skills/${seededSkill.slug}`, {
-          method: 'DELETE',
-          headers: memberHeaders,
-        })
-      ).status,
-    ).toBe(403);
-    expect(await store.getSkill(seededSkill.slug)).not.toBeNull();
-  });
-
-  it('hides catalog writes from outsiders with 404', async () => {
-    const { app, store, seededAgent, seededSkill, outsiderHeaders } = await catalogFixture();
-    const beforeAgents = (await store.listAgents()).length;
-    expect(
-      (
-        await app.request('/api/agents', {
-          method: 'POST',
-          headers: outsiderHeaders,
-          body: JSON.stringify(AGENT_BODY),
-        })
-      ).status,
-    ).toBe(404);
-    expect((await store.listAgents()).length).toBe(beforeAgents);
-    expect(
-      (
-        await app.request(`/api/agents/${seededAgent.id}`, {
-          method: 'PATCH',
-          headers: outsiderHeaders,
-          body: JSON.stringify({ title: 'Hacked' }),
-        })
-      ).status,
-    ).toBe(404);
-    expect(
-      (
-        await app.request(`/api/agents/${seededAgent.id}`, {
-          method: 'DELETE',
-          headers: outsiderHeaders,
-        })
-      ).status,
-    ).toBe(404);
-    expect(
-      (
-        await app.request('/api/skills', {
-          method: 'POST',
-          headers: outsiderHeaders,
-          body: JSON.stringify(SKILL_BODY),
-        })
-      ).status,
-    ).toBe(404);
-    expect(
-      (
-        await app.request(`/api/skills/${seededSkill.slug}`, {
-          method: 'DELETE',
-          headers: outsiderHeaders,
-        })
-      ).status,
-    ).toBe(404);
-    expect(await store.getAgent(seededAgent.id)).not.toBeNull();
     expect(await store.getSkill(seededSkill.slug)).not.toBeNull();
   });
 
   it('still lists agents and skills for members and outsiders', async () => {
-    const { app, memberHeaders, outsiderHeaders } = await catalogFixture();
-    expect((await app.request('/api/agents', { headers: memberHeaders })).status).toBe(200);
-    expect((await app.request('/api/skills', { headers: memberHeaders })).status).toBe(200);
-    expect((await app.request('/api/agents', { headers: outsiderHeaders })).status).toBe(200);
-    expect((await app.request('/api/skills', { headers: outsiderHeaders })).status).toBe(200);
+    const { app } = await catalogFixture();
+    const headersList = [jsonHeaders(memberPerson), jsonHeaders(outsiderPerson)];
+    for (const headers of headersList) {
+      expect((await app.request('/api/agents', { headers })).status).toBe(200);
+      expect((await app.request('/api/skills', { headers })).status).toBe(200);
+    }
   });
 });

@@ -686,6 +686,11 @@ describe('turns and runs', () => {
     await drainRuns(deps);
     const runs = await store.listRunsForChannel(defaultChannel);
     expect(runs.filter((row) => row.status === 'succeeded')).toHaveLength(3);
+    expect(
+      runs
+        .filter((row) => row.parentRunId !== null)
+        .every((row) => row.triggerType === 'delegation'),
+    ).toBe(true);
     const hops = await store.listDelegationsForParent(result.runId);
     expect(hops).toHaveLength(1);
     expect(hops[0]?.toBotId).toBe('triage');

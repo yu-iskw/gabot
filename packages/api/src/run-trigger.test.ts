@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createApiApp } from './app.js';
 import { MemoryStore } from './store/memory-store.js';
-import { createScriptedAgentRunner, executeTurn } from './turns.js';
+import { createScriptedAgentRunner } from './turns.js';
 
 import type { VerifiedPerson } from '@gabot/common';
 
@@ -82,24 +82,5 @@ describe('run trigger at admit', () => {
       (row) => row.type === 'run.started',
     );
     expect(started?.payload.trigger).toBe('routine');
-  });
-
-  it('keeps delegated children as delegation', async () => {
-    const store = new MemoryStore();
-    await store.upsertUser(person, admins);
-    const result = await executeTurn({
-      store,
-      agent: createScriptedAgentRunner(),
-      mcpUrl: 'http://mcp.test',
-      user: { ...person, isAdmin: true },
-      channelId: defaultChannel,
-      botId: 'monitor',
-      message: 'inspect production errors from the last 24 hours',
-      triggerType: 'interactive',
-    });
-    const hops = await store.listDelegationsForParent(result.runId);
-    expect(hops).toHaveLength(1);
-    const childRun = await store.getRun(hops[0]?.childRunId ?? '');
-    expect(childRun?.triggerType).toBe('delegation');
   });
 });

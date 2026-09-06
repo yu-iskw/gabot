@@ -1,6 +1,6 @@
 import { asRecord, asStringArray, cloneAuthority } from '@gabot/common';
 
-import type { RunRecord, RunStatus } from './types.js';
+import type { RunRecord, RunStatus, RunTriggerType } from './types.js';
 import type { AuthorityEnvelope } from '@gabot/common';
 
 export type DbRun = {
@@ -45,6 +45,19 @@ function toRunStatus(value: string): RunStatus {
   }
 }
 
+function toRunTriggerType(value: string): RunTriggerType {
+  switch (value) {
+    case 'delegation':
+    case 'interactive':
+    case 'routine': {
+      return value;
+    }
+    default: {
+      return 'interactive';
+    }
+  }
+}
+
 export function toRunRecord(row: DbRun): RunRecord {
   return {
     id: row.id,
@@ -55,7 +68,7 @@ export function toRunRecord(row: DbRun): RunRecord {
     rootRunId: row.root_run_id,
     botId: row.bot_id,
     ownerUserId: row.owner_user_id,
-    triggerType: row.trigger_type,
+    triggerType: toRunTriggerType(row.trigger_type),
     status: toRunStatus(row.status),
     objective: row.objective,
     authority: parseEnvelope(row.authority),

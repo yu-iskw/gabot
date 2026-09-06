@@ -43,6 +43,7 @@ import type {
   ChannelPolicyRecord,
   ChannelRecord,
   ChannelScope,
+  CreateRunInput,
   DelegatedChildInput,
   DelegationRecord,
   GabotStore,
@@ -56,7 +57,6 @@ import type {
   RoutineRecord,
   RunRecord,
   RunStatus,
-  RunTriggerType,
   SessionUser,
   SkillRecord,
   WorkRecord,
@@ -657,21 +657,7 @@ export class MemoryStore implements GabotStore {
     return this.events.filter((row) => row.channelId === channelId).map((row) => ({ ...row }));
   }
 
-  public async createRun(input: {
-    authority: AuthorityEnvelope;
-    botId: string;
-    channelId: string;
-    depth: number;
-    id?: string;
-    objective: string;
-    ownerUserId: string;
-    parentRunId?: string;
-    projectId: string;
-    rootRunId?: string;
-    status: RunStatus;
-    triggerType: RunTriggerType;
-    workspaceId: string;
-  }): Promise<RunRecord> {
+  public async createRun(input: CreateRunInput): Promise<RunRecord> {
     const id = input.id ?? randomUUID();
     const record: RunRecord = {
       id,
