@@ -179,9 +179,6 @@ async function handleItem(
 ): Promise<void> {
   try {
     switch (item.kind) {
-      case 'computer.cull': {
-        break;
-      }
       case 'handoff': {
         await deliverHandoff(item, input.apiUrl, input.secret);
         break;
