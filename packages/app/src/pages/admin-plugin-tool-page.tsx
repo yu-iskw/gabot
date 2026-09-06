@@ -4,6 +4,7 @@ import { apiJson } from '../api.js';
 import { FactRow, PageEmpty, PageSection, PageShell } from '../components/layout/page-shell.js';
 import { Switch } from '../components/ui/switch.js';
 import { useAuth } from '../lib/auth-context.js';
+import { useSession } from '../lib/session-context.js';
 
 type PluginDetail = {
   plugin: { id: string; title: string };
@@ -23,9 +24,10 @@ export function AdminPluginToolPage({
   toolName: string;
 }) {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const queryClient = useQueryClient();
   const detail = useQuery({
-    queryKey: ['plugin', pluginId],
+    queryKey: queryKey('plugin', pluginId),
     queryFn: async () => apiJson<PluginDetail>(`/api/admin/plugins/${pluginId}`, await token()),
   });
   const setGrant = useMutation({
@@ -35,9 +37,9 @@ export function AdminPluginToolPage({
         body: JSON.stringify(input),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['plugin', pluginId] });
-      await queryClient.invalidateQueries({ queryKey: ['plugins'] });
-      await queryClient.invalidateQueries({ queryKey: ['audit'] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('plugin', pluginId) });
+      await queryClient.invalidateQueries({ queryKey: queryKey('plugins') });
+      await queryClient.invalidateQueries({ queryKey: queryKey('audit') });
     },
   });
 

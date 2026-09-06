@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiJson } from '../../api.js';
 import { useAuth } from '../../lib/auth-context.js';
+import { useSession } from '../../lib/session-context.js';
 import { Button } from '../ui/button.js';
 
 import type { Coworker } from '../../lib/agents.js';
@@ -10,9 +11,10 @@ type Participant = { principalId: string; principalType: string };
 
 export function ChannelRoster({ channelId }: { channelId: string }) {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const queryClient = useQueryClient();
   const participants = useQuery({
-    queryKey: ['participants', channelId],
+    queryKey: queryKey('participants', channelId),
     queryFn: async () => {
       const body = await apiJson<{ participants: Participant[] }>(
         `/api/channels/${channelId}/participants`,
@@ -22,7 +24,7 @@ export function ChannelRoster({ channelId }: { channelId: string }) {
     },
   });
   const agents = useQuery({
-    queryKey: ['agents'],
+    queryKey: queryKey('agents'),
     queryFn: async () => {
       const body = await apiJson<{ agents: Coworker[] }>('/api/agents', await token());
       return body.agents;
@@ -35,7 +37,7 @@ export function ChannelRoster({ channelId }: { channelId: string }) {
         body: JSON.stringify({ agentId }),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['participants', channelId] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('participants', channelId) });
     },
   });
   const remove = useMutation({
@@ -44,7 +46,7 @@ export function ChannelRoster({ channelId }: { channelId: string }) {
         method: 'DELETE',
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['participants', channelId] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('participants', channelId) });
     },
   });
   const bots = (participants.data ?? []).filter((row) => row.principalType === 'bot');

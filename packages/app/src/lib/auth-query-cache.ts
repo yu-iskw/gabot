@@ -1,11 +1,16 @@
 import type { QueryClient } from '@tanstack/react-query';
 
+export type AuthCacheIdentity = {
+  generation: number;
+  uid: string | null;
+};
+
 export function syncAuthQueryCache(
   queryClient: QueryClient,
-  previousUid: string | null,
-  nextUid: string | null,
+  previous: AuthCacheIdentity,
+  next: AuthCacheIdentity,
 ): void {
-  if (previousUid !== nextUid) {
+  if (previous.uid !== next.uid || previous.generation !== next.generation) {
     queryClient.clear();
   }
 }

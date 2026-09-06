@@ -4,13 +4,15 @@ import { apiJson } from '../api.js';
 import { PageEmpty, PageShell } from '../components/layout/page-shell.js';
 import { readAuditPayload } from '../lib/audit-payload.js';
 import { useAuth } from '../lib/auth-context.js';
+import { useSession } from '../lib/session-context.js';
 
 type AuditEvent = { eventType: string; payload: unknown };
 
 export function AdminAuditPage() {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const audit = useQuery({
-    queryKey: ['audit', 'admin'],
+    queryKey: queryKey('audit', 'admin'),
     queryFn: async () => {
       const body = await apiJson<{ events: AuditEvent[] }>(
         '/api/admin/audit-events?limit=50',

@@ -5,6 +5,7 @@ import { PageEmpty, PageRows, PageSection, PageShell } from '../components/layou
 import { Button } from '../components/ui/button.js';
 import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
+import { useSession } from '../lib/session-context.js';
 
 type Routine = {
   id: string;
@@ -16,9 +17,10 @@ type Routine = {
 
 export function RoutinesPage() {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const queryClient = useQueryClient();
   const routines = useQuery({
-    queryKey: ['routines'],
+    queryKey: queryKey('routines'),
     queryFn: async () => {
       const body = await apiJson<{ routines: Routine[] }>('/api/routines', await token());
       return body.routines;
@@ -30,12 +32,12 @@ export function RoutinesPage() {
         method: 'PUT',
         body: JSON.stringify({ enabled: input.enabled }),
       }),
-    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ['routines'] }),
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: queryKey('routines') }),
   });
   const remove = useMutation({
     mutationFn: async (id: string) =>
       apiJson(`/api/routines/${id}`, await token(), { method: 'DELETE' }),
-    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ['routines'] }),
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: queryKey('routines') }),
   });
 
   return (

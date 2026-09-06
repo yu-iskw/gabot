@@ -151,6 +151,36 @@ describe('control plane', () => {
       email: person.email,
       isAdmin: true,
       identity: person.identity,
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      role: 'admin',
+      membershipStatus: 'active',
+      defaultChannelId: defaultChannel,
+    });
+  });
+
+  it('returns member role and workspace on /api/me', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    await app.request('/api/me', { headers: { authorization: `Bearer ${goodToken}` } });
+    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
+    await store.upsertUser(other, []);
+    await store.upsertMembership({ userId: other.id, role: 'member', status: 'active' });
+    const memberToken = peopleAuth.mintIdToken({
+      subject: other.id,
+      email: other.email,
+      name: other.name,
+    });
+    const response = await app.request('/api/me', {
+      headers: { authorization: `Bearer ${memberToken}` },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      email: other.email,
+      isAdmin: false,
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      role: 'member',
+      membershipStatus: 'active',
+      defaultChannelId: defaultChannel,
     });
   });
 

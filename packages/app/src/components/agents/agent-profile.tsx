@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import { apiJson } from '../../api.js';
 import { useAuth } from '../../lib/auth-context.js';
+import { useSession } from '../../lib/session-context.js';
 import { ChannelAvatar } from '../channels/channel-avatar.js';
 import { Button } from '../ui/button.js';
 import { Input } from '../ui/input.js';
@@ -15,11 +16,12 @@ const PROTECTED_AGENT_ID = 'general-assistant';
 
 export function AgentProfile({ agentId, onDeleted }: { agentId: string; onDeleted?: () => void }) {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const agent = useQuery({
-    queryKey: ['agent', agentId],
+    queryKey: queryKey('agent', agentId),
     queryFn: async () => {
       const body = await apiJson<{ agent: Coworker }>(`/api/agents/${agentId}`, await token());
       return body.agent;
@@ -34,7 +36,7 @@ export function AgentProfile({ agentId, onDeleted }: { agentId: string; onDelete
       return created.channel.id;
     },
     onSuccess: async (channelId) => {
-      await queryClient.invalidateQueries({ queryKey: ['channels'] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('channels') });
       await navigate({ to: '/channel/$channelId', params: { channelId } });
     },
   });
@@ -51,14 +53,14 @@ export function AgentProfile({ agentId, onDeleted }: { agentId: string; onDelete
       }),
     onSuccess: async () => {
       setEditing(false);
-      await queryClient.invalidateQueries({ queryKey: ['agents'] });
-      await queryClient.invalidateQueries({ queryKey: ['agent', agentId] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('agents') });
+      await queryClient.invalidateQueries({ queryKey: queryKey('agent', agentId) });
     },
   });
   const remove = useMutation({
     mutationFn: async () => apiJson(`/api/agents/${agentId}`, await token(), { method: 'DELETE' }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['agents'] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('agents') });
       onDeleted?.();
     },
   });

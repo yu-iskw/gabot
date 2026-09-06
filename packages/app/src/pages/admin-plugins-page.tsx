@@ -11,6 +11,7 @@ import {
 import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
 import { pluginRowSummary } from '../lib/grant-summary.js';
+import { useSession } from '../lib/session-context.js';
 
 type PluginListItem = {
   grantedCount: number;
@@ -23,8 +24,9 @@ type PluginListItem = {
 
 export function AdminPluginsPage() {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const plugins = useQuery({
-    queryKey: ['plugins'],
+    queryKey: queryKey('plugins'),
     queryFn: async () => {
       const body = await apiJson<{ plugins: PluginListItem[] }>(
         '/api/admin/plugins',

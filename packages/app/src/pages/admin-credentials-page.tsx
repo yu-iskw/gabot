@@ -10,6 +10,7 @@ import {
 } from '../components/layout/page-shell.js';
 import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
+import { useSession } from '../lib/session-context.js';
 
 type OwnerConnection = {
   credentialRef: string;
@@ -20,8 +21,9 @@ type OwnerConnection = {
 
 export function AdminCredentialsPage() {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const listed = useQuery({
-    queryKey: ['connections'],
+    queryKey: queryKey('connections'),
     queryFn: async () => {
       const body = await apiJson<{ connections: OwnerConnection[] }>(
         '/api/admin/connections',

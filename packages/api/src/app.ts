@@ -82,7 +82,18 @@ export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariabl
 }
 
 function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options: ApiOptions): void {
-  app.get('/api/me', (context) => context.json(context.get('user')));
+  app.get('/api/me', async (context) => {
+    const user = context.get('user');
+    const membership = await options.store.getMembership(user.id);
+    const workspace = await options.store.getWorkspaceForUser(user.id);
+    return context.json({
+      ...user,
+      defaultChannelId: workspace?.defaultChannelId ?? null,
+      membershipStatus: membership?.status ?? null,
+      role: membership?.role ?? null,
+      workspaceId: workspace?.id ?? null,
+    });
+  });
   app.get(API_CHANNELS, async (context) => {
     const user = context.get('user');
     return context.json({ channels: await options.store.listChannels(user.id) });

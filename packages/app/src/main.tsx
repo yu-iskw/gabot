@@ -20,6 +20,7 @@ import {
   searchRecord,
 } from './lib/channel-pane.js';
 import { readRouteString } from './lib/route-param.js';
+import { SessionProvider } from './lib/session-context.js';
 import { SidebarProvider } from './lib/sidebar-context.js';
 import { applyDarkTheme, parseStoredDarkTheme, THEME_STORAGE_KEY } from './lib/theme.js';
 import { SignPage } from './login-page.js';
@@ -66,14 +67,16 @@ function AuthedScreen() {
     return <Navigate to="/sign" />;
   }
   return (
-    <SidebarProvider>
-      <div className="flex h-svh overflow-hidden">
-        <AppSidebar />
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <Outlet />
-        </main>
-      </div>
-    </SidebarProvider>
+    <SessionProvider>
+      <SidebarProvider>
+        <div className="flex h-svh overflow-hidden">
+          <AppSidebar />
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <Outlet />
+          </main>
+        </div>
+      </SidebarProvider>
+    </SessionProvider>
   );
 }
 

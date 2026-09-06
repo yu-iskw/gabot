@@ -4,13 +4,15 @@ import { apiJson } from '../api.js';
 import { PageEmpty, PageRows, PageSection, PageShell } from '../components/layout/page-shell.js';
 import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
+import { useSession } from '../lib/session-context.js';
 
 type Person = { id: string; email: string; name: string; isAdmin: boolean };
 
 export function AdminPeoplePage() {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const people = useQuery({
-    queryKey: ['people'],
+    queryKey: queryKey('people'),
     queryFn: async () => {
       const body = await apiJson<{ people: Person[] }>('/api/admin/people', await token());
       return body.people;

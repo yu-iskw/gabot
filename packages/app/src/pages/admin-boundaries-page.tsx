@@ -6,15 +6,17 @@ import { PageSection, PageShell } from '../components/layout/page-shell.js';
 import { Button } from '../components/ui/button.js';
 import { Textarea } from '../components/ui/textarea.js';
 import { useAuth } from '../lib/auth-context.js';
+import { useSession } from '../lib/session-context.js';
 
 type Policy = { mode: string; deny: string[]; allow: string[] };
 
 export function AdminBoundariesPage() {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const queryClient = useQueryClient();
   const [denyText, setDenyText] = useState<string | null>(null);
   const policy = useQuery({
-    queryKey: ['policy'],
+    queryKey: queryKey('policy'),
     queryFn: async () => {
       const body = await apiJson<{ policy: Policy }>('/api/admin/action-policy', await token());
       return body.policy;
@@ -26,7 +28,7 @@ export function AdminBoundariesPage() {
         method: 'PUT',
         body: JSON.stringify(next),
       }),
-    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ['policy'] }),
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: queryKey('policy') }),
   });
   const current = policy.data;
   const deny = denyText ?? current?.deny.join('\n') ?? '';
