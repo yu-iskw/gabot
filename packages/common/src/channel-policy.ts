@@ -6,6 +6,7 @@ export type ChannelPolicy = {
 
 export type ChannelPolicyMatch = { ok: true } | { ok: false; reason: string };
 
+/** Prototype overlay: missing rows inherit. Empty deny lives in policy-algebra.ts. */
 export function matchChannelPolicy(input: {
   capability: string;
   channelId: string;

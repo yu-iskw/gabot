@@ -125,3 +125,63 @@ export type { A2AAgentCard } from './a2a-card.js';
 export { createMastraAgentCard, isA2AAgentCard } from './a2a-card.js';
 export { isMainModule } from './is-main.js';
 export { asRecord, asString, asStringArray } from './json-value.js';
+export type { ContractResult } from './contract-result.js';
+export { contractFail, contractOk, parseNonEmptyString } from './contract-result.js';
+export { parseHttpOrigin } from './http-origin.js';
+export type { IdentityKey } from './identity-key.js';
+export { identityKeyEquals, parseIdentityKey, serializeIdentityKey } from './identity-key.js';
+export type { ResourceType, ScopedResourceRef } from './resource-ref.js';
+export {
+  parseResourceType,
+  parseScopedResourceRef,
+  RESOURCE_TYPES,
+  scopedResourceEquals,
+  scopedResourceKey,
+} from './resource-ref.js';
+export type { BackendBinding, FederationOperation, WorkspaceScope } from './workspace-boundary.js';
+export {
+  assertBackendOrigin,
+  assertLocalWorkspaceId,
+  assertNoFederation,
+  assertOneWorkspacePerBackend,
+  assertSameWorkspaceScope,
+  FEDERATION_OPERATIONS,
+  parseWorkspaceScope,
+  workspaceScopeFromRef,
+} from './workspace-boundary.js';
+export type { AllowSet, CombinedPolicy, PolicyLayer, PolicyLayerKind } from './policy-algebra.js';
+export {
+  allowSet,
+  combinePolicyLayers,
+  EMPTY_ALLOW_SET,
+  optionalAllowFromChannelRows,
+  resourcePermitted,
+  UNRESTRICTED_ALLOW_SET,
+} from './policy-algebra.js';
+export type { CatalogInvocationFlags, CatalogStage } from './catalog-stage.js';
+export { CATALOG_STAGES, invocationAuthorized } from './catalog-stage.js';
+export type {
+  AudienceKind,
+  ExecutionPrincipal,
+  RunAudience,
+  RunIdentity,
+  RunInitiator,
+  RunSponsor,
+  SponsorKind,
+} from './run-identity.js';
+export { parseRunIdentity } from './run-identity.js';
+export type {
+  BootstrapDiscovery,
+  ContractError,
+  ContractErrorCode,
+  ScopedFeedEvent,
+} from './protocol-contracts.js';
+export {
+  apiVersionsCompatible,
+  assertEventInScope,
+  bindBootstrapDiscovery,
+  CONTRACT_ERROR_CODES,
+  contractError,
+  parseBootstrapDiscovery,
+  parseScopedFeedEvent,
+} from './protocol-contracts.js';
