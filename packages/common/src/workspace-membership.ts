@@ -52,3 +52,38 @@ export function membershipIsActive(row: WorkspaceMembership): boolean {
     }
   }
 }
+
+export function membershipCoversWorkspace(
+  row: WorkspaceMembership | null,
+  workspaceId: string,
+): boolean {
+  return row !== null && membershipIsActive(row) && row.workspaceId === workspaceId;
+}
+
+export function workspaceRoleCanAdminister(role: WorkspaceRole): boolean {
+  switch (role) {
+    case 'admin':
+      return true;
+    case 'auditor':
+    case 'member':
+      return false;
+    default: {
+      const exhaustive: never = role;
+      return exhaustive;
+    }
+  }
+}
+
+export function workspaceRoleCanReadAudit(role: WorkspaceRole): boolean {
+  switch (role) {
+    case 'admin':
+    case 'auditor':
+      return true;
+    case 'member':
+      return false;
+    default: {
+      const exhaustive: never = role;
+      return exhaustive;
+    }
+  }
+}
