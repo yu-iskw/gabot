@@ -5,8 +5,11 @@ import {
   type CapabilityGrant,
   type ChannelPolicy,
   type IdentityKey,
+  type MembershipStatus,
   type OwnerConnection,
   type VerifiedPerson,
+  type WorkspaceMembership,
+  type WorkspaceRole,
 } from '@gabot/common';
 
 export type ChannelRecord = {
@@ -225,6 +228,13 @@ export const WORKSPACE_NOT_FOUND = 'Workspace not found.';
 
 export type GabotStore = {
   upsertUser(person: VerifiedPerson, adminIdentities: IdentityKey[]): Promise<SessionUser>;
+  getMembership(userId: string): Promise<WorkspaceMembership | null>;
+  listMemberships(): Promise<WorkspaceMembership[]>;
+  upsertMembership(input: {
+    role: WorkspaceRole;
+    status: MembershipStatus;
+    userId: string;
+  }): Promise<WorkspaceMembership>;
   listChannels(userId: string): Promise<ChannelRecord[]>;
   getChannel(channelId: string, userId: string): Promise<ChannelRecord | null>;
   updateChannel(channelId: string, patch: ChannelPatch): Promise<ChannelRecord | null>;

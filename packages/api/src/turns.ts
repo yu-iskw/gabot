@@ -3,6 +3,7 @@ import {
   collectText,
   collectToolCalls,
   decideScriptedTurn,
+  membershipCoversWorkspace,
   mentionedBotId,
   parseAguiSse,
   rootAuthority,
@@ -123,15 +124,18 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
   if (!participating) {
     throw new TurnClientError(`Bot ${botId} is not a participant on channel ${input.channelId}.`);
   }
-  if (input.user.id !== scope.ownerUserId) {
-    throw new TurnClientError('Only the workspace owner may start a run on this channel.');
+  const membership = await input.store.getMembership(input.user.id);
+  if (!membershipCoversWorkspace(membership, scope.workspaceId)) {
+    throw new TurnClientError(
+      'Active workspace membership is required to start a run on this channel.',
+    );
   }
   const run = await input.store.createRun({
     workspaceId: scope.workspaceId,
     projectId: scope.projectId,
     channelId: input.channelId,
     botId,
-    ownerUserId: scope.ownerUserId,
+    ownerUserId: input.user.id,
     triggerType: 'interactive',
     status: 'queued',
     objective: input.message,
@@ -174,6 +178,10 @@ export async function executeRun(input: ExecuteRunInput): Promise<TurnResult> {
   }
   if (run.status === 'succeeded' || run.status === 'cancelled' || run.status === 'failed') {
     return { runId: run.id, text: '', toolNames: [] };
+  }
+  const membership = await input.store.getMembership(input.user.id);
+  if (!membershipCoversWorkspace(membership, run.workspaceId)) {
+    throw new TurnClientError('Active workspace membership is required to execute this run.');
   }
   await input.store.updateRunStatus(run.id, 'running');
   try {

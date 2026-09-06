@@ -132,17 +132,30 @@ export const organizationMembers = pgTable(
   (table) => [primaryKey({ columns: [table.organizationId, table.userId] })],
 );
 
-export const workspaces = pgTable(
-  'workspaces',
+export const workspaces = pgTable('workspaces', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
+  ownerUserId: text('owner_user_id').notNull(),
+  name: text('name').notNull(),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const workspaceMembers = pgTable(
+  'workspace_members',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id').notNull(),
-    ownerUserId: text('owner_user_id').notNull(),
-    name: text('name').notNull(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    status: text('status').notNull().default('active'),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex('workspaces_owner_user_id_uidx').on(table.ownerUserId)],
+  (table) => [primaryKey({ columns: [table.workspaceId, table.userId] })],
 );
 
 export const projects = pgTable('projects', {

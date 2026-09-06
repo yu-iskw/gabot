@@ -4,12 +4,15 @@ import {
   DEFAULT_CHANNEL_NAME,
   DEFAULT_PROJECT_NAME,
   defaultChannelParticipants,
+  DEFAULT_WORKSPACE_ID,
   identityKeyEquals,
+  membershipIsActive,
   nextRoutineRun,
-  personalChannelId,
-  personalProjectId,
-  personalWorkspaceId,
+  parseMembershipStatus,
+  parseWorkspaceRole,
   PLATFORM_ORG_ID,
+  workspaceDefaultChannelId,
+  workspaceProjectId,
 } from '@gabot/common';
 import postgres from 'postgres';
 
@@ -55,13 +58,28 @@ import type {
   WorkRecord,
   WorkspaceRecord,
 } from './types.js';
-import type { ActionPolicy, AuthorityEnvelope, IdentityKey, VerifiedPerson } from '@gabot/common';
+import type {
+  ActionPolicy,
+  AuthorityEnvelope,
+  IdentityKey,
+  MembershipStatus,
+  VerifiedPerson,
+  WorkspaceMembership,
+  WorkspaceRole,
+} from '@gabot/common';
 
 type Sql = ReturnType<typeof postgres>;
 type TxSql = postgres.TransactionSql;
 
 export class PostgresStore implements GabotStore {
-  public constructor(private readonly sql: Sql) {}
+  private readonly workspaceId: string;
+
+  public constructor(
+    private readonly sql: Sql,
+    options?: { workspaceId?: string },
+  ) {
+    this.workspaceId = options?.workspaceId ?? DEFAULT_WORKSPACE_ID;
+  }
 
   public async upsertUser(
     person: VerifiedPerson,
@@ -105,8 +123,77 @@ export class PostgresStore implements GabotStore {
       `;
     }
     const session = toSessionUser(user, isAdmin);
-    await this.ensurePersonalWorkspace(session);
+    await this.maybeBootstrapAdmin(session, adminIdentities);
     return session;
+  }
+
+  public async getMembership(userId: string): Promise<WorkspaceMembership | null> {
+    const rows = await this.sql<
+      { role: string; status: string; user_id: string; workspace_id: string }[]
+    >`
+      SELECT workspace_id, user_id, role, status
+      FROM workspace_members
+      WHERE workspace_id = ${this.workspaceId} AND user_id = ${userId}
+    `;
+    const row = rows.at(0);
+    return row === undefined ? null : toMembership(row);
+  }
+
+  public async listMemberships(): Promise<WorkspaceMembership[]> {
+    const rows = await this.sql<
+      { role: string; status: string; user_id: string; workspace_id: string }[]
+    >`
+      SELECT workspace_id, user_id, role, status
+      FROM workspace_members
+      WHERE workspace_id = ${this.workspaceId}
+      ORDER BY created_at, user_id
+    `;
+    return rows.map((row) => toMembership(row));
+  }
+
+  public async upsertMembership(input: {
+    role: WorkspaceRole;
+    status: MembershipStatus;
+    userId: string;
+  }): Promise<WorkspaceMembership> {
+    const workspaceRows = await this.sql<{ id: string }[]>`
+      SELECT id FROM workspaces WHERE id = ${this.workspaceId}
+    `;
+    if (workspaceRows.at(0) === undefined) {
+      throw new Error(WORKSPACE_NOT_FOUND);
+    }
+    await this.sql`
+      INSERT INTO workspace_members (workspace_id, user_id, role, status)
+      VALUES (${this.workspaceId}, ${input.userId}, ${input.role}, ${input.status})
+      ON CONFLICT (workspace_id, user_id) DO UPDATE
+      SET role = EXCLUDED.role, status = EXCLUDED.status, updated_at = now()
+    `;
+    const membership: WorkspaceMembership = {
+      workspaceId: this.workspaceId,
+      userId: input.userId,
+      role: input.role,
+      status: input.status,
+    };
+    if (membershipIsActive(membership)) {
+      const channelId = workspaceDefaultChannelId(this.workspaceId);
+      const role = input.role === 'admin' ? 'owner' : 'member';
+      await this.sql`
+        INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
+        VALUES (${channelId}, 'user', ${input.userId}, ${role})
+        ON CONFLICT DO NOTHING
+      `;
+    } else {
+      await this.sql`
+        DELETE FROM channel_participants p
+        USING channels c, projects proj
+        WHERE p.channel_id = c.id
+          AND c.project_id = proj.id
+          AND proj.workspace_id = ${this.workspaceId}
+          AND p.principal_type = 'user'
+          AND p.principal_id = ${input.userId}
+      `;
+    }
+    return membership;
   }
 
   public async listChannels(userId: string): Promise<ChannelRecord[]> {
@@ -421,9 +508,7 @@ export class PostgresStore implements GabotStore {
     const roles = await this.sql<{ role: string }[]>`
       SELECT role FROM user_roles WHERE user_id = ${userId} AND role = 'admin'
     `;
-    const session = toSessionUser(user, roles.length > 0);
-    await this.ensurePersonalWorkspace(session);
-    return session;
+    return toSessionUser(user, roles.length > 0);
   }
 
   public async listPeople(): Promise<SessionUser[]> {
@@ -714,6 +799,11 @@ export class PostgresStore implements GabotStore {
   }
 
   public async getWorkspaceForUser(userId: string): Promise<WorkspaceRecord | null> {
+    const membership = await this.getMembership(userId);
+    if (!membership || !membershipIsActive(membership)) {
+      return null;
+    }
+    const projectId = workspaceProjectId(this.workspaceId);
     const rows = await this.sql<
       {
         id: string;
@@ -725,8 +815,8 @@ export class PostgresStore implements GabotStore {
     >`
       SELECT w.id, w.organization_id, w.owner_user_id, w.name, p.id AS project_id
       FROM workspaces w
-      JOIN projects p ON p.workspace_id = w.id AND p.id = ${personalProjectId(userId)}
-      WHERE w.owner_user_id = ${userId}
+      JOIN projects p ON p.workspace_id = w.id AND p.id = ${projectId}
+      WHERE w.id = ${this.workspaceId}
       LIMIT 1
     `;
     const row = rows.at(0);
@@ -739,7 +829,7 @@ export class PostgresStore implements GabotStore {
       ownerUserId: row.owner_user_id,
       name: row.name,
       projectId: row.project_id,
-      defaultChannelId: personalChannelId(userId),
+      defaultChannelId: workspaceDefaultChannelId(row.id),
     };
   }
 
@@ -1041,11 +1131,37 @@ export class PostgresStore implements GabotStore {
     }));
   }
 
-  private async ensurePersonalWorkspace(user: SessionUser): Promise<void> {
-    const workspaceId = personalWorkspaceId(user.id);
-    const projectId = personalProjectId(user.id);
-    const channelId = personalChannelId(user.id);
-    const orgRole = user.isAdmin ? 'admin' : 'member';
+  private async maybeBootstrapAdmin(
+    user: SessionUser,
+    adminIdentities: IdentityKey[],
+  ): Promise<void> {
+    const matchesBootstrap = adminIdentities.some((admin) =>
+      identityKeyEquals(admin, user.identity),
+    );
+    if (!matchesBootstrap) {
+      return;
+    }
+    const existing = await this.getMembership(user.id);
+    if (existing) {
+      return;
+    }
+    const admins = await this.sql<{ n: string }[]>`
+      SELECT 1 AS n FROM workspace_members
+      WHERE workspace_id = ${this.workspaceId} AND role = 'admin' AND status = 'active'
+      LIMIT 1
+    `;
+    if (admins.length > 0) {
+      return;
+    }
+    await this.ensureBackendWorkspace(user);
+    await this.upsertMembership({ userId: user.id, role: 'admin', status: 'active' });
+  }
+
+  private async ensureBackendWorkspace(owner: SessionUser): Promise<void> {
+    const workspaceId = this.workspaceId;
+    const projectId = workspaceProjectId(workspaceId);
+    const channelId = workspaceDefaultChannelId(workspaceId);
+    const orgRole = owner.isAdmin ? 'admin' : 'member';
     await this.sql.begin(async (sql) => {
       await sql`
         INSERT INTO organizations (id, name) VALUES (${PLATFORM_ORG_ID}, 'gabot')
@@ -1053,12 +1169,12 @@ export class PostgresStore implements GabotStore {
       `;
       await sql`
         INSERT INTO organization_members (organization_id, user_id, role)
-        VALUES (${PLATFORM_ORG_ID}, ${user.id}, ${orgRole})
+        VALUES (${PLATFORM_ORG_ID}, ${owner.id}, ${orgRole})
         ON CONFLICT DO NOTHING
       `;
       const created = await sql<{ id: string }[]>`
         INSERT INTO workspaces (id, organization_id, owner_user_id, name)
-        VALUES (${workspaceId}, ${PLATFORM_ORG_ID}, ${user.id}, ${`${user.name}'s workspace`})
+        VALUES (${workspaceId}, ${PLATFORM_ORG_ID}, ${owner.id}, ${owner.name})
         ON CONFLICT (id) DO NOTHING
         RETURNING id
       `;
@@ -1074,15 +1190,11 @@ export class PostgresStore implements GabotStore {
         RETURNING id
       `;
       await Promise.all([
-        this.retireSharedGeneral(sql, user.id),
+        this.retireSharedGeneral(sql, owner.id),
         createdChannel.length > 0
-          ? this.attachChannelParties(sql, channelId, user.id)
-          : sql`
-              INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
-              VALUES (${channelId}, 'user', ${user.id}, 'owner')
-              ON CONFLICT DO NOTHING
-            `,
-        insertDefaultOwnerConnections(sql, workspaceId, user.id, created.length > 0),
+          ? this.attachChannelParties(sql, channelId, owner.id)
+          : Promise.resolve(),
+        insertDefaultOwnerConnections(sql, workspaceId, owner.id, created.length > 0),
       ]);
     });
   }
@@ -1140,6 +1252,25 @@ function toSessionUser(
       row.tenant.length > 0
         ? { issuer: row.issuer, subject: row.subject, tenant: row.tenant }
         : { issuer: row.issuer, subject: row.subject },
+  };
+}
+
+function toMembership(row: {
+  role: string;
+  status: string;
+  user_id: string;
+  workspace_id: string;
+}): WorkspaceMembership {
+  const role = parseWorkspaceRole(row.role);
+  const status = parseMembershipStatus(row.status);
+  if (!role.ok || !status.ok) {
+    throw new Error('Invalid workspace membership row.');
+  }
+  return {
+    workspaceId: row.workspace_id,
+    userId: row.user_id,
+    role: role.value,
+    status: status.value,
   };
 }
 
