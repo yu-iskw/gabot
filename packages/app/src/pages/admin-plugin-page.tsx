@@ -10,6 +10,7 @@ import {
 } from '../components/layout/page-shell.js';
 import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
+import { useSession } from '../lib/session-context.js';
 
 type PluginDetail = {
   plugin: { id: string; title: string; url: string; vendor: string };
@@ -23,8 +24,9 @@ type PluginDetail = {
 
 export function AdminPluginPage({ pluginId }: { pluginId: string }) {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const detail = useQuery({
-    queryKey: ['plugin', pluginId],
+    queryKey: queryKey('plugin', pluginId),
     queryFn: async () => apiJson<PluginDetail>(`/api/admin/plugins/${pluginId}`, await token()),
   });
 

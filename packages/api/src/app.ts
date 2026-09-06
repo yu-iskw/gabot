@@ -23,6 +23,7 @@ import {
   WORKSPACE_NOT_FOUND,
   type ChannelRecord,
   type GabotStore,
+  type SessionMeResponse,
   type SessionUser,
   type WorkspaceRecord,
 } from './store/types.js';
@@ -82,7 +83,19 @@ export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariabl
 }
 
 function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options: ApiOptions): void {
-  app.get('/api/me', (context) => context.json(context.get('user')));
+  app.get('/api/me', async (context) => {
+    const user = context.get('user');
+    const membership = await options.store.getMembership(user.id);
+    const workspace = await options.store.getWorkspaceForUser(user.id);
+    const body: SessionMeResponse = {
+      ...user,
+      defaultChannelId: workspace?.defaultChannelId ?? null,
+      membershipStatus: membership?.status ?? null,
+      role: membership?.role ?? null,
+      workspaceId: workspace?.id ?? null,
+    };
+    return context.json(body);
+  });
   app.get(API_CHANNELS, async (context) => {
     const user = context.get('user');
     return context.json({ channels: await options.store.listChannels(user.id) });

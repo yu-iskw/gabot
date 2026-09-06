@@ -6,6 +6,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { apiJson } from '../../api.js';
 import { useAuth } from '../../lib/auth-context.js';
+import { useSession } from '../../lib/session-context.js';
 import { cn } from '../../lib/utils.js';
 import { Button } from '../ui/button.js';
 
@@ -190,15 +191,16 @@ function useComposerCatalog(permittedAgentIds?: readonly string[]): {
   commands: ReturnType<typeof toCommandOptions>;
 } {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const agents = useQuery({
-    queryKey: ['agents'],
+    queryKey: queryKey('agents'),
     queryFn: async () => {
       const body = await apiJson<{ agents: Coworker[] }>('/api/agents', await token());
       return body.agents;
     },
   });
   const skills = useQuery({
-    queryKey: ['skills'],
+    queryKey: queryKey('skills'),
     queryFn: async () => {
       const body = await apiJson<{ skills: SkillRow[] }>('/api/skills', await token());
       return body.skills;

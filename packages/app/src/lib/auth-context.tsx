@@ -27,7 +27,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return auth.onAuthStateChanged((next) => {
       const nextUid = next?.uid ?? null;
-      syncAuthQueryCache(queryClient, uidRef.current, nextUid);
+      syncAuthQueryCache(
+        queryClient,
+        { generation: 0, uid: uidRef.current },
+        { generation: 0, uid: nextUid },
+      );
       uidRef.current = nextUid;
       setUser(next);
       setReady(true);

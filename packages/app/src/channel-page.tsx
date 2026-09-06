@@ -14,7 +14,7 @@ import { DetailPanel } from './components/layout/detail-panel.js';
 import { SidebarToggle } from './components/layout/sidebar-toggle.js';
 import { Button } from './components/ui/button.js';
 import { useAuth } from './lib/auth-context.js';
-import { personalChannelId } from './lib/personal-channel.js';
+import { useSession } from './lib/session-context.js';
 
 import type { ChannelPane } from './lib/channel-pane.js';
 import type { NamedProject } from './lib/project-channels.js';
@@ -32,10 +32,11 @@ export function ChannelPage({
   pane: ChannelPane | null;
 }) {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const [reply, setReply] = useState('');
   const queryClient = useQueryClient();
   const channels = useQuery({
-    queryKey: ['channels'],
+    queryKey: queryKey('channels'),
     queryFn: async () => {
       const body = await apiJson<{
         channels: Array<{ id: string; name: string; projectId: string }>;
@@ -44,7 +45,7 @@ export function ChannelPage({
     },
   });
   const projects = useQuery({
-    queryKey: ['projects'],
+    queryKey: queryKey('projects'),
     queryFn: async () => {
       const body = await apiJson<{ projects: NamedProject[] }>('/api/projects', await token());
       return body.projects;
@@ -54,7 +55,7 @@ export function ChannelPage({
   const channelName = channel?.name ?? 'Channel';
   const projectName = projects.data?.find((row) => row.id === channel?.projectId)?.name;
   const messages = useQuery({
-    queryKey: ['messages', channelId],
+    queryKey: queryKey('messages', channelId),
     refetchInterval: 2000,
     queryFn: async () => {
       const body = await apiJson<{
@@ -70,7 +71,7 @@ export function ChannelPage({
     },
   });
   const participants = useQuery({
-    queryKey: ['participants', channelId],
+    queryKey: queryKey('participants', channelId),
     queryFn: async () => {
       const body = await apiJson<{
         participants: Array<{ principalId: string; principalType: string }>;
@@ -79,7 +80,7 @@ export function ChannelPage({
     },
   });
   const events = useQuery({
-    queryKey: ['events', channelId],
+    queryKey: queryKey('events', channelId),
     refetchInterval: 2000,
     queryFn: async () => {
       const body = await apiJson<{
@@ -99,13 +100,13 @@ export function ChannelPage({
     onSuccess: async (text) => {
       setReply(text);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['messages'] }),
-        queryClient.invalidateQueries({ queryKey: ['events'] }),
-        queryClient.invalidateQueries({ queryKey: ['participants'] }),
-        queryClient.invalidateQueries({ queryKey: ['audit'] }),
-        queryClient.invalidateQueries({ queryKey: ['channels'] }),
-        queryClient.invalidateQueries({ queryKey: ['agents'] }),
-        queryClient.invalidateQueries({ queryKey: ['routines'] }),
+        queryClient.invalidateQueries({ queryKey: queryKey('messages') }),
+        queryClient.invalidateQueries({ queryKey: queryKey('events') }),
+        queryClient.invalidateQueries({ queryKey: queryKey('participants') }),
+        queryClient.invalidateQueries({ queryKey: queryKey('audit') }),
+        queryClient.invalidateQueries({ queryKey: queryKey('channels') }),
+        queryClient.invalidateQueries({ queryKey: queryKey('agents') }),
+        queryClient.invalidateQueries({ queryKey: queryKey('routines') }),
       ]);
     },
   });
@@ -162,15 +163,16 @@ function paneDetail(pane: ChannelPane | null, channelId: string, botId: string) 
 }
 
 function ChannelSettings({ botId, channelId }: { botId: string; channelId: string }) {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
+  const { me, queryKey } = useSession();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const isDefaultGeneral = Boolean(user && channelId === personalChannelId(user.uid));
+  const isDefaultGeneral = Boolean(me.defaultChannelId && channelId === me.defaultChannelId);
   const archive = useMutation({
     mutationFn: async () =>
       apiJson(`/api/channels/${channelId}/archive`, await token(), { method: 'POST' }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['channels'] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('channels') });
       await navigate({ to: '/' });
     },
   });

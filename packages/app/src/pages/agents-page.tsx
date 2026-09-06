@@ -9,11 +9,13 @@ import { Button } from '../components/ui/button.js';
 import { Input } from '../components/ui/input.js';
 import { Textarea } from '../components/ui/textarea.js';
 import { useAuth } from '../lib/auth-context.js';
+import { useSession } from '../lib/session-context.js';
 
 import type { Coworker } from '../lib/agents.js';
 
 export function AgentsPage() {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -25,7 +27,7 @@ export function AgentsPage() {
     }
   }, [selectedId]);
   const agents = useQuery({
-    queryKey: ['agents'],
+    queryKey: queryKey('agents'),
     queryFn: async () => {
       const body = await apiJson<{ agents: Coworker[] }>('/api/agents', await token());
       return body.agents;
@@ -40,7 +42,7 @@ export function AgentsPage() {
     onSuccess: async (body) => {
       setOpen(false);
       setSelectedId(body.agent.id);
-      await queryClient.invalidateQueries({ queryKey: ['agents'] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('agents') });
     },
   });
 

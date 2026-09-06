@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 
 import { apiJson } from '../../api.js';
 import { useAuth } from '../../lib/auth-context.js';
+import { useSession } from '../../lib/session-context.js';
 import { splitSkillChip } from '../../lib/skill-chip.js';
 import { captionForTool } from '../../lib/tool-caption.js';
 import { interleaveTranscript } from '../../lib/transcript-timeline.js';
@@ -163,8 +164,9 @@ function UserBubble({ commandNames, text }: { commandNames: string; text: string
 
 function useCommandNames(): string {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const skills = useQuery({
-    queryKey: ['skills'],
+    queryKey: queryKey('skills'),
     queryFn: async () => {
       const body = await apiJson<{ skills: SkillRow[] }>('/api/skills', await token());
       return body.skills;

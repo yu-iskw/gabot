@@ -17,8 +17,9 @@ import { useState } from 'react';
 import { apiJson } from '../api.js';
 import { useAuth } from '../lib/auth-context.js';
 import { matchingChannels } from '../lib/channel-search.js';
-import { personalChannelId } from '../lib/personal-channel.js';
 import { groupChannelsByProject } from '../lib/project-channels.js';
+import { useSession } from '../lib/session-context.js';
+import { sessionMembershipLabel } from '../lib/session-scope.js';
 import { useSidebar } from '../lib/sidebar-context.js';
 import { cn } from '../lib/utils.js';
 
@@ -33,17 +34,18 @@ type Channel = { id: string; lastMessage: string | null; name: string; projectId
 
 export function AppSidebar() {
   const { auth, token, user } = useAuth();
+  const { me, queryKey } = useSession();
   const { open, toggle } = useSidebar();
   const [search, setSearch] = useState('');
   const channels = useQuery({
-    queryKey: ['channels'],
+    queryKey: queryKey('channels'),
     queryFn: async () => {
       const body = await apiJson<{ channels: Channel[] }>('/api/channels', await token());
       return body.channels;
     },
   });
   const projects = useQuery({
-    queryKey: ['projects'],
+    queryKey: queryKey('projects'),
     queryFn: async () => {
       const body = await apiJson<{ projects: NamedProject[] }>('/api/projects', await token());
       return body.projects;
@@ -109,11 +111,7 @@ export function AppSidebar() {
                     to="/channel/$channelId"
                     params={{ channelId: channel.id }}
                     search={{}}
-                    data-testid={
-                      user && channel.id === personalChannelId(user.uid)
-                        ? 'channel-general'
-                        : undefined
-                    }
+                    data-testid={channel.id === me.defaultChannelId ? 'channel-general' : undefined}
                     className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-sidebar-accent"
                   >
                     <ChannelAvatar name={channel.name} size={32} />
@@ -139,8 +137,16 @@ export function AppSidebar() {
               label="Settings"
             />
             <div className="flex items-center justify-between px-2 py-2">
-              <span className="truncate text-xs" data-testid="user-email">
-                {user?.email}
+              <span className="min-w-0">
+                <span className="block truncate text-xs" data-testid="user-email">
+                  {user?.email}
+                </span>
+                <span
+                  className="block truncate text-[11px] text-muted-foreground"
+                  data-testid="workspace-session"
+                >
+                  {sessionMembershipLabel(me)}
+                </span>
               </span>
               <Button
                 variant="ghost"

@@ -9,26 +9,29 @@ import { SidebarToggleBar } from '../components/layout/sidebar-toggle.js';
 import { Input } from '../components/ui/input.js';
 import { useAuth } from '../lib/auth-context.js';
 import { resolveProjectId } from '../lib/resolve-project-id.js';
+import { useSession } from '../lib/session-context.js';
+import { sessionMembershipLabel } from '../lib/session-scope.js';
 
 import type { Coworker } from '../lib/agents.js';
 import type { NamedProject } from '../lib/project-channels.js';
 
 export function HomePage() {
   const { token } = useAuth();
+  const { me, queryKey } = useSession();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [projectId, setProjectId] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [description, setDescription] = useState('');
   const agents = useQuery({
-    queryKey: ['agents'],
+    queryKey: queryKey('agents'),
     queryFn: async () => {
       const body = await apiJson<{ agents: Coworker[] }>('/api/agents', await token());
       return body.agents;
     },
   });
   const projects = useQuery({
-    queryKey: ['projects'],
+    queryKey: queryKey('projects'),
     queryFn: async () => {
       const body = await apiJson<{ projects: NamedProject[] }>('/api/projects', await token());
       return body.projects;
@@ -42,12 +45,18 @@ export function HomePage() {
       return createChannel(auth, {
         name: agent.title || agent.name,
         agentId: agent.id,
-        projectId: await projectIdForCreate(auth, selectedProject, newProjectName, queryClient),
+        projectId: await projectIdForCreate(
+          auth,
+          selectedProject,
+          newProjectName,
+          queryClient,
+          queryKey('projects'),
+        ),
         description: description || undefined,
       });
     },
     onSuccess: async (channelId) => {
-      await queryClient.invalidateQueries({ queryKey: ['channels'] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('channels') });
       await navigate({ to: '/channel/$channelId', params: { channelId } });
     },
   });
@@ -57,7 +66,13 @@ export function HomePage() {
       const channelId = await createChannel(auth, {
         name: channelNameFrom(input.message),
         agentId: input.botId || undefined,
-        projectId: await projectIdForCreate(auth, selectedProject, newProjectName, queryClient),
+        projectId: await projectIdForCreate(
+          auth,
+          selectedProject,
+          newProjectName,
+          queryClient,
+          queryKey('projects'),
+        ),
         description: description || undefined,
       });
       await readTurnStream(
@@ -69,7 +84,7 @@ export function HomePage() {
       return channelId;
     },
     onSuccess: async (channelId) => {
-      await queryClient.invalidateQueries({ queryKey: ['channels'] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('channels') });
       await navigate({ to: '/channel/$channelId', params: { channelId } });
     },
   });
@@ -130,6 +145,12 @@ export function HomePage() {
             submitLabel="Start"
             onSubmit={(input) => start.mutate(input)}
           />
+          <p
+            className="mt-2 w-full text-center text-xs text-muted-foreground"
+            data-testid="composer-workspace"
+          >
+            {sessionMembershipLabel(me, 'No workspace membership')}
+          </p>
           <p className="mt-2 w-full text-center text-xs text-muted-foreground">
             Sent to the coworker it is for. Type <code>@</code> to choose one yourself.
           </p>
@@ -162,13 +183,14 @@ async function projectIdForCreate(
   selectedProject: string,
   newProjectName: string,
   queryClient: QueryClient,
+  projectsKey: unknown[],
 ): Promise<string | undefined> {
   return resolveProjectId(selectedProject, newProjectName, async (name) => {
     const created = await apiJson<{ project: { id: string } }>('/api/projects', token, {
       method: 'POST',
       body: JSON.stringify({ name }),
     });
-    await queryClient.invalidateQueries({ queryKey: ['projects'] });
+    await queryClient.invalidateQueries({ queryKey: projectsKey });
     return created.project.id;
   });
 }

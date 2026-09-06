@@ -8,6 +8,7 @@ import { Input } from '../components/ui/input.js';
 import { Separator } from '../components/ui/separator.js';
 import { Textarea } from '../components/ui/textarea.js';
 import { useAuth } from '../lib/auth-context.js';
+import { useSession } from '../lib/session-context.js';
 
 type Skill = {
   id: string;
@@ -19,11 +20,12 @@ type Skill = {
 
 export function SkillsPage() {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'idle' | 'new' | 'edit'>('idle');
   const [editing, setEditing] = useState<Skill | null>(null);
   const skills = useQuery({
-    queryKey: ['skills'],
+    queryKey: queryKey('skills'),
     queryFn: async () => {
       const body = await apiJson<{ skills: Skill[] }>('/api/skills', await token());
       return body.skills;
@@ -43,7 +45,7 @@ export function SkillsPage() {
     onSuccess: async (body) => {
       setMode('idle');
       setEditing(null);
-      queryClient.setQueryData<Skill[]>(['skills'], (current) => {
+      queryClient.setQueryData<Skill[]>(queryKey('skills'), (current) => {
         const rows = current ?? [];
         const index = rows.findIndex((row) => row.slug === body.skill.slug);
         if (index < 0) {
@@ -51,7 +53,7 @@ export function SkillsPage() {
         }
         return rows.map((row, rowIndex) => (rowIndex === index ? body.skill : row));
       });
-      await queryClient.invalidateQueries({ queryKey: ['skills'] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('skills') });
     },
   });
   const remove = useMutation({
@@ -60,7 +62,7 @@ export function SkillsPage() {
     onSuccess: async () => {
       setMode('idle');
       setEditing(null);
-      await queryClient.invalidateQueries({ queryKey: ['skills'] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('skills') });
     },
   });
 

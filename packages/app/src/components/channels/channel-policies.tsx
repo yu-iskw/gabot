@@ -3,6 +3,7 @@ import { useState } from 'react';
 
 import { apiJson } from '../../api.js';
 import { useAuth } from '../../lib/auth-context.js';
+import { useSession } from '../../lib/session-context.js';
 import { Button } from '../ui/button.js';
 import { Input } from '../ui/input.js';
 
@@ -12,11 +13,12 @@ const DEFAULT_POLICY_CAPABILITY = 'github.issues.create';
 
 export function ChannelPolicies({ channelId }: { channelId: string }) {
   const { token } = useAuth();
+  const { queryKey } = useSession();
   const queryClient = useQueryClient();
   const [capability, setCapability] = useState(DEFAULT_POLICY_CAPABILITY);
   const [resource, setResource] = useState('');
   const policies = useQuery({
-    queryKey: ['channel-policies', channelId],
+    queryKey: queryKey('channel-policies', channelId),
     queryFn: async () => {
       const body = await apiJson<{ policies: PolicyRow[] }>(
         `/api/channels/${channelId}/policies`,
@@ -32,7 +34,7 @@ export function ChannelPolicies({ channelId }: { channelId: string }) {
         body: JSON.stringify({ policies: next }),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['channel-policies', channelId] });
+      await queryClient.invalidateQueries({ queryKey: queryKey('channel-policies', channelId) });
       setResource('');
     },
   });
