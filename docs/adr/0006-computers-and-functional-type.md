@@ -4,7 +4,7 @@ Date: 2026-09-04
 
 ## Status
 
-Accepted
+Superseded by [0016](0016-built-in-computer-out-of-product-scope.md)
 
 ## Context
 

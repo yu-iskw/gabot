@@ -4,7 +4,7 @@ Date: 2026-09-04
 
 ## Status
 
-Accepted
+Superseded by [0014](0014-enterprise-workspace-contracts.md)
 
 ## Context
 
