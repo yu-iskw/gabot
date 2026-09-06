@@ -3,7 +3,9 @@ import {
   asString,
   matchesToken,
   mcpCapabilityForRef,
-  personalChannelId,
+  membershipIsActive,
+  parseMembershipStatusOrActive,
+  parseWorkspaceRole,
   PROVIDER_MOCK_MCP,
 } from '@gabot/common';
 import { Hono } from 'hono';
@@ -212,7 +214,7 @@ function registerChannelMutationRoutes(
     if (!owned.ok) {
       return context.json(owned.body, owned.status);
     }
-    if (owned.channel.id === personalChannelId(context.get('user').id)) {
+    if (owned.channel.id === owned.workspace.defaultChannelId) {
       return context.json({ error: DEFAULT_CHANNEL_LOCKED }, 400);
     }
     await options.store.archiveChannel(owned.channel.id);
@@ -231,15 +233,15 @@ function registerChannelMutationRoutes(
     if (!agentId) {
       return context.json({ error: INVALID_BODY }, 400);
     }
-    const allowed = await botParticipantOrError(options.store, agentId);
+    const allowed = await participantOrError(options.store, agentId);
     if (!allowed.ok) {
       return context.json(allowed.body, allowed.status);
     }
     const participant = {
       channelId: owned.channel.id,
-      principalType: 'bot' as const,
+      principalType: allowed.principalType,
       principalId: agentId,
-      role: 'bot',
+      role: allowed.role,
     };
     await options.store.addChannelParticipant(participant);
     return context.json({ participant }, 201);
@@ -254,13 +256,13 @@ function registerChannelMutationRoutes(
       return context.json(owned.body, owned.status);
     }
     const agentId = context.req.param('agentId');
-    const allowed = await botParticipantOrError(options.store, agentId);
+    const allowed = await participantOrError(options.store, agentId);
     if (!allowed.ok) {
       return context.json(allowed.body, allowed.status);
     }
     const removed = await options.store.removeChannelParticipant({
       channelId: owned.channel.id,
-      principalType: 'bot',
+      principalType: allowed.principalType,
       principalId: agentId,
     });
     if (!removed) {
@@ -421,6 +423,43 @@ function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options:
   });
   app.get('/api/admin/people', async (context) => {
     return context.json({ people: await options.store.listPeople() });
+  });
+  app.get('/api/admin/memberships', async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
+    return context.json({ memberships: await options.store.listMemberships() });
+  });
+  app.put('/api/admin/memberships', async (context) => {
+    const access = await requireAdminWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
+    const body = asRecord(await context.req.json());
+    const userId = asString(body.userId);
+    const role = parseWorkspaceRole(body.role);
+    const status = parseMembershipStatusOrActive(body.status);
+    if (!userId || !role.ok || !status.ok) {
+      return context.json({ error: INVALID_BODY }, 400);
+    }
+    const person = await options.store.getUser(userId);
+    if (!person) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    try {
+      const membership = await options.store.upsertMembership({
+        userId,
+        role: role.value,
+        status: status.value,
+      });
+      return context.json({ membership });
+    } catch (error) {
+      if (error instanceof Error && error.message === WORKSPACE_NOT_FOUND) {
+        return context.json({ error: NOT_FOUND }, 404);
+      }
+      throw error;
+    }
   });
   app.get(`${API_AGENTS}/:id`, async (context) => {
     const agents = await options.store.listAgents();
@@ -722,30 +761,47 @@ async function requireOwnedChannel(
   user: SessionUser,
   channelId: string,
 ): Promise<
-  | { channel: ChannelRecord; ok: true }
+  | { channel: ChannelRecord; ok: true; workspace: WorkspaceRecord }
   | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
 > {
   const channel = await store.getChannel(channelId, user.id);
   if (!channel) {
     return { ok: false, status: 404, body: { error: NOT_FOUND } };
   }
-  const scope = await store.getChannelScope(channelId);
-  if (!scope || scope.ownerUserId !== user.id) {
+  const [scope, membership, workspace] = await Promise.all([
+    store.getChannelScope(channelId),
+    store.getMembership(user.id),
+    store.getWorkspaceForUser(user.id),
+  ]);
+  if (
+    !scope ||
+    !workspace ||
+    !membership ||
+    !membershipIsActive(membership) ||
+    membership.workspaceId !== scope.workspaceId
+  ) {
     return { ok: false, status: 403, body: { error: FORBIDDEN } };
   }
-  return { ok: true, channel };
+  return { ok: true, channel, workspace };
 }
 
-async function botParticipantOrError(
+async function participantOrError(
   store: GabotStore,
-  agentId: string,
-): Promise<{ body: Record<string, unknown>; ok: false; status: 403 | 404 } | { ok: true }> {
-  const agent = await store.getAgent(agentId);
+  principalId: string,
+): Promise<
+  | { ok: true; principalType: 'bot' | 'user'; role: string }
+  | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
+> {
+  const agent = await store.getAgent(principalId);
   if (agent) {
-    return { ok: true };
+    return { ok: true, principalType: 'bot', role: 'bot' };
+  }
+  const membership = await store.getMembership(principalId);
+  if (membership && membershipIsActive(membership)) {
+    return { ok: true, principalType: 'user', role: 'member' };
   }
   const people = await store.listPeople();
-  if (people.some((row) => row.id === agentId)) {
+  if (people.some((row) => row.id === principalId)) {
     return { ok: false, status: 403, body: { error: HUMANS_FORBIDDEN } };
   }
   return { ok: false, status: 404, body: { error: NOT_FOUND } };

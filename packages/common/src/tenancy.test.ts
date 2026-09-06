@@ -6,6 +6,9 @@ import {
   mentionedBotId,
   parseBotIdentityContent,
   personalChannelId,
+  workspaceDefaultChannelId,
+  workspaceProjectId,
+  workspaceSlug,
 } from './tenancy.js';
 
 describe('mentionedBotId', () => {
@@ -41,6 +44,14 @@ describe('personalChannelId', () => {
   it('is unique per user rather than a shared general channel', () => {
     expect(personalChannelId('user-1')).not.toBe(personalChannelId('user-2'));
     expect(personalChannelId('user-1')).toContain('user-1');
+  });
+});
+
+describe('workspaceDefaultChannelId', () => {
+  it('derives a shared General channel from the backend workspace id', () => {
+    expect(workspaceDefaultChannelId('ws-gabot')).toBe('ch-gabot-general');
+    expect(workspaceProjectId('ws-gabot')).toBe('proj-gabot');
+    expect(workspaceSlug('ws-pay')).toBe('pay');
   });
 });
 

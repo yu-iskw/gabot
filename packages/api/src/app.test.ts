@@ -4,6 +4,7 @@ import {
   CAPABILITY_MCP_ECHO,
   createScriptedPeopleAuth,
   DEFAULT_ALLOW_POLICY,
+  DEFAULT_WORKSPACE_ID,
   GITHUB_ALLOWED_REPO,
   GITHUB_CREATE_ISSUE,
   MCP_ECHO,
@@ -13,6 +14,7 @@ import {
   RESOURCE_MCP_ECHO,
   rootAuthority,
   TURN_TOOL_NAMES,
+  workspaceDefaultChannelId,
 } from '@gabot/common';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -39,7 +41,7 @@ function verifiedPerson(
 
 const person = verifiedPerson('user-1', 'admin@example.com', 'Admin');
 const admins = [person.identity];
-const defaultChannel = personalChannelId(person.id);
+const defaultChannel = workspaceDefaultChannelId(DEFAULT_WORKSPACE_ID);
 const peopleAuth = createScriptedPeopleAuth({
   issuer: TEST_ISSUER,
   audience: TEST_AUDIENCE,
@@ -105,12 +107,17 @@ describe('schema sql', () => {
     expect(schema.capabilityGrants).toBeDefined();
     expect(schema.channelPolicies).toBeDefined();
     expect(schema.organizationMembers).toBeDefined();
+    expect(schema.workspaceMembers).toBeDefined();
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS runs');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS connections');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS capability_grants');
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS channel_policies');
     expect(SCHEMA_SQL).toContain('users_identity_uidx');
-    expect(SCHEMA_SQL).toContain('workspaces_owner_user_id_uidx');
+    expect(SCHEMA_SQL).toContain('DROP INDEX IF EXISTS workspaces_owner_user_id_uidx');
+    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS workspace_members');
+    expect(SCHEMA_SQL).not.toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS workspaces_owner_user_id_uidx',
+    );
     expect(SCHEMA_SQL).toContain('channels_project_id_fkey');
     expect(SCHEMA_SQL).toContain(
       'INSERT INTO connections (id, workspace_id, owner_user_id, provider, credential_ref, status)',
@@ -118,12 +125,12 @@ describe('schema sql', () => {
     expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS organization_members');
     expect(SCHEMA_SQL).toContain("WHERE channel_id = 'general'");
     expect(SCHEMA_SQL).toContain('FROM channel_memberships');
-    expect(SCHEMA_SQL).toContain("p.principal_type = 'bot'");
+    expect(SCHEMA_SQL).toContain("cp.principal_type = 'user'");
     expect(DEFAULT_ALLOW_POLICY.allow).toEqual(['true']);
-    const provision = SCHEMA_SQL.indexOf("ch-' || id || '-general'");
+    const membership = SCHEMA_SQL.indexOf('CREATE TABLE IF NOT EXISTS workspace_members');
     const retarget = SCHEMA_SQL.indexOf('UPDATE routines');
-    expect(provision).toBeGreaterThanOrEqual(0);
-    expect(retarget).toBeGreaterThan(provision);
+    expect(membership).toBeGreaterThanOrEqual(0);
+    expect(retarget).toBeGreaterThan(membership);
   });
 });
 
@@ -551,16 +558,21 @@ describe('control plane', () => {
     expect(routines[0]?.instruction).toBe('say hi');
   });
 
-  it('provisions a personal workspace and channel per user', async () => {
+  it('joins two users to one backend workspace with distinct roles', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, admins);
-    await store.upsertUser(verifiedPerson('user-2', 'other@example.com', 'Other'), []);
+    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
+    await store.upsertUser(other, []);
+    await store.upsertMembership({ userId: other.id, role: 'member', status: 'active' });
     const first = await store.getWorkspaceForUser(person.id);
-    const second = await store.getWorkspaceForUser('user-2');
-    expect(first?.ownerUserId).toBe(person.id);
-    expect(second?.ownerUserId).toBe('user-2');
-    expect(first?.id).not.toBe(second?.id);
-    expect(first?.defaultChannelId).not.toBe(second?.defaultChannelId);
+    const second = await store.getWorkspaceForUser(other.id);
+    expect(first?.id).toBe(DEFAULT_WORKSPACE_ID);
+    expect(second?.id).toBe(first?.id);
+    expect(first?.defaultChannelId).toBe(defaultChannel);
+    expect(second?.defaultChannelId).toBe(first?.defaultChannelId);
+    expect((await store.getMembership(person.id))?.role).toBe('admin');
+    expect((await store.getMembership(other.id))?.role).toBe('member');
+    expect(await store.getWorkspaceForUser(other.id)).toEqual(first);
   });
 });
 
@@ -861,13 +873,14 @@ describe('turns and runs', () => {
 });
 
 describe('capability grants', () => {
-  it('refuses a non-owner participant from starting a run that spends owner grants', async () => {
+  it('refuses a non-member from starting a run that spends owner grants', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, admins);
-    await store.upsertUser(verifiedPerson('user-2', 'other@example.com', 'Other'), []);
+    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
+    await store.upsertUser(other, []);
     await store.addChannelParticipant({
       channelId: defaultChannel,
-      principalId: 'user-2',
+      principalId: other.id,
       principalType: 'user',
       role: 'member',
     });
@@ -876,11 +889,30 @@ describe('capability grants', () => {
         store,
         agent: createScriptedAgentRunner(),
         mcpUrl: 'http://mcp.test',
-        user: { ...verifiedPerson('user-2', 'other@example.com', 'Other'), isAdmin: false },
+        user: { ...other, isAdmin: false },
         channelId: defaultChannel,
         message: 'create an issue on acme/allowed',
       }),
-    ).rejects.toThrow(/workspace owner/);
+    ).rejects.toThrow(/membership/);
+  });
+
+  it('lets an active member start a run on a shared channel', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, admins);
+    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
+    await store.upsertUser(other, []);
+    await store.upsertMembership({ userId: other.id, role: 'member', status: 'active' });
+    const result = await executeTurn({
+      store,
+      agent: createScriptedAgentRunner(),
+      mcpUrl: 'http://mcp.test',
+      user: { ...other, isAdmin: false },
+      channelId: defaultChannel,
+      message: 'hello',
+    });
+    const run = await store.getRun(result.runId);
+    expect(run?.ownerUserId).toBe(other.id);
+    expect(run?.workspaceId).toBe(DEFAULT_WORKSPACE_ID);
   });
 
   it('refuses MCP echo until the workspace grant exists, then allows it', async () => {
@@ -1109,9 +1141,8 @@ describe('capability grants', () => {
 
   it('seeds the GitHub grant when a workspace is created', async () => {
     const store = new MemoryStore();
-    const other = verifiedPerson('user-3', 'third@example.com', 'Third');
-    await store.upsertUser(other, []);
-    const workspace = await store.getWorkspaceForUser(other.id);
+    await store.upsertUser(person, admins);
+    const workspace = await store.getWorkspaceForUser(person.id);
     if (!workspace) {
       throw new Error('workspace missing');
     }
@@ -1223,20 +1254,25 @@ describe('projects and channels', () => {
     const app = appWith(store);
     const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     await store.upsertUser(person, admins);
-    await store.upsertUser(verifiedPerson('user-2', 'other@example.com', 'Other'), []);
-    const other = await store.getWorkspaceForUser('user-2');
+    const foreign = await store.createProject({ workspaceId: 'ws-foreign', name: 'Stolen' });
     const created = await app.request('/api/channels', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ name: 'Stolen', projectId: other?.projectId }),
+      body: JSON.stringify({ name: 'Stolen', projectId: foreign.id }),
     });
     expect(created.status).toBe(404);
   });
 
-  it('adds a bot participant and refuses a human', async () => {
+  it('adds a bot participant and a workspace member as a human', async () => {
     const store = new MemoryStore();
     const app = appWith(store);
     const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
+    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
+    const outsider = verifiedPerson('user-3', 'outsider@example.com', 'Outsider');
+    await store.upsertUser(person, admins);
+    await store.upsertUser(other, []);
+    await store.upsertUser(outsider, []);
+    await store.upsertMembership({ userId: other.id, role: 'member', status: 'active' });
     const agent = await app.request('/api/agents', {
       method: 'POST',
       headers,
@@ -1252,9 +1288,15 @@ describe('projects and channels', () => {
     const human = await app.request(`/api/channels/${defaultChannel}/participants`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ agentId: person.id }),
+      body: JSON.stringify({ agentId: other.id }),
     });
-    expect(human.status).toBe(403);
+    expect(human.status).toBe(201);
+    const refused = await app.request(`/api/channels/${defaultChannel}/participants`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ agentId: outsider.id }),
+    });
+    expect(refused.status).toBe(403);
     const removed = await app.request(
       `/api/channels/${defaultChannel}/participants/${profile.agent.id}`,
       { method: 'DELETE', headers },
@@ -1264,6 +1306,7 @@ describe('projects and channels', () => {
       await app.request(`/api/channels/${defaultChannel}/participants`, { headers })
     ).json()) as { participants: Array<{ principalId: string }> };
     expect(roster.participants.some((row) => row.principalId === profile.agent.id)).toBe(false);
+    expect(roster.participants.some((row) => row.principalId === other.id)).toBe(true);
   });
 
   it('archives a channel so it is omitted from the list', async () => {
@@ -1349,20 +1392,88 @@ describe('projects and channels', () => {
     expect(listed.channels.some((row) => row.name === 'General')).toBe(true);
   });
 
-  it('keeps a single workspace per owner after a second upsert', async () => {
+  it('keeps a single workspace after a second upsert', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, admins);
     await store.upsertUser(person, admins);
     await store.upsertUser(verifiedPerson('user-2', 'other@example.com', 'Other'), []);
     const first = await store.getWorkspaceForUser(person.id);
     const second = await store.getWorkspaceForUser('user-2');
-    expect(first?.id).not.toBe(second?.id);
+    expect(first?.id).toBe(DEFAULT_WORKSPACE_ID);
+    expect(second).toBeNull();
     expect(first?.ownerUserId).toBe(person.id);
-    expect(second?.ownerUserId).toBe('user-2');
     const extra = await store.createProject({ workspaceId: first?.id ?? '', name: 'Ops' });
     const after = await store.getWorkspaceForUser(person.id);
     expect(after?.projectId).not.toBe(extra.id);
     expect(after?.projectId).toBe(first?.projectId);
+  });
+
+  it('does not share membership with a second backend workspace', async () => {
+    const engineering = new MemoryStore({ workspaceId: 'ws-eng' });
+    const payments = new MemoryStore({ workspaceId: 'ws-pay' });
+    await engineering.upsertUser(person, admins);
+    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
+    await engineering.upsertUser(other, []);
+    await engineering.upsertMembership({ userId: other.id, role: 'member', status: 'active' });
+    await payments.upsertUser(person, admins);
+    await payments.upsertUser(other, []);
+    expect((await engineering.getWorkspaceForUser(other.id))?.id).toBe('ws-eng');
+    expect(await payments.getWorkspaceForUser(other.id)).toBeNull();
+    expect((await payments.getWorkspaceForUser(person.id))?.id).toBe('ws-pay');
+    expect((await engineering.getMembership(other.id))?.role).toBe('member');
+    expect(await payments.getMembership(other.id)).toBeNull();
+  });
+
+  it('lists and assigns membership through admin routes', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
+    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
+    await store.upsertUser(person, admins);
+    await store.upsertUser(other, []);
+    const assigned = await app.request('/api/admin/memberships', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ userId: other.id, role: 'auditor' }),
+    });
+    expect(assigned.status).toBe(200);
+    const listed = await app.request('/api/admin/memberships', { headers });
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as {
+      memberships: Array<{ role: string; userId: string }>;
+    };
+    expect(body.memberships).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ userId: person.id, role: 'admin' }),
+        expect.objectContaining({ userId: other.id, role: 'auditor' }),
+      ]),
+    );
+  });
+
+  it('lets two members load channels they participate in', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    const other = verifiedPerson('user-2', 'other@example.com', 'Other');
+    await store.upsertUser(person, admins);
+    await store.upsertUser(other, []);
+    await store.upsertMembership({ userId: other.id, role: 'member', status: 'active' });
+    const memberToken = peopleAuth.mintIdToken({
+      subject: other.id,
+      email: other.email,
+      name: other.name,
+    });
+    const adminListed = await app.request('/api/channels', {
+      headers: { authorization: `Bearer ${goodToken}` },
+    });
+    const memberListed = await app.request('/api/channels', {
+      headers: { authorization: `Bearer ${memberToken}` },
+    });
+    expect(adminListed.status).toBe(200);
+    expect(memberListed.status).toBe(200);
+    const adminBody = (await adminListed.json()) as { channels: Array<{ id: string }> };
+    const memberBody = (await memberListed.json()) as { channels: Array<{ id: string }> };
+    expect(adminBody.channels.some((row) => row.id === defaultChannel)).toBe(true);
+    expect(memberBody.channels.some((row) => row.id === defaultChannel)).toBe(true);
   });
 });
 

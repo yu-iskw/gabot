@@ -257,7 +257,19 @@ CREATE TABLE IF NOT EXISTS workspaces (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT workspaces_owner_required CHECK (owner_user_id IS NOT NULL)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS workspaces_owner_user_id_uidx ON workspaces (owner_user_id);
+DROP INDEX IF EXISTS workspaces_owner_user_id_uidx;
+
+CREATE TABLE IF NOT EXISTS workspace_members (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (workspace_id, user_id),
+  CONSTRAINT workspace_members_role_check CHECK (role IN ('admin', 'member', 'auditor')),
+  CONSTRAINT workspace_members_status_check CHECK (status IN ('active', 'revoked'))
+);
 
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -374,37 +386,8 @@ SELECT 'org-gabot', u.id,
 FROM users u
 ON CONFLICT DO NOTHING;
 
-INSERT INTO workspaces (id, organization_id, owner_user_id, name)
-SELECT 'ws-' || id, 'org-gabot', id, COALESCE(name, 'User') || '''s workspace'
-FROM users
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO projects (id, workspace_id, name)
-SELECT 'proj-' || id, 'ws-' || id, 'Default'
-FROM users
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO channels (id, name, description, project_id)
-SELECT 'ch-' || id || '-general', 'General', 'Default coworker channel', 'proj-' || id
-FROM users
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
-SELECT 'ch-' || id || '-general', 'user', id, 'owner'
-FROM users
-ON CONFLICT DO NOTHING;
-
-INSERT INTO channel_participants (channel_id, principal_type, principal_id, role)
-SELECT 'ch-' || u.id || '-general', 'bot', b.id, 'bot'
-FROM users u
-CROSS JOIN (
-  VALUES ('general-assistant'), ('monitor'), ('triage'), ('coder')
-) AS b(id)
-WHERE NOT EXISTS (
-  SELECT 1 FROM channel_participants p
-  WHERE p.channel_id = 'ch-' || u.id || '-general' AND p.principal_type = 'bot'
-)
-ON CONFLICT DO NOTHING;
+-- One backend workspace is created at first admin bootstrap. Do not seed
+-- per-user workspaces (ADR 0014 / 0017).
 
 INSERT INTO connections (id, workspace_id, owner_user_id, provider, credential_ref, status)
 SELECT 'conn-' || id || '-gabot', id, owner_user_id, 'gabot', 'local', 'active' FROM workspaces

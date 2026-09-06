@@ -96,6 +96,7 @@ export {
   DEFAULT_CHANNEL_NAME,
   DEFAULT_PROJECT_NAME,
   DEFAULT_TEAM_BOT_IDS,
+  DEFAULT_WORKSPACE_ID,
   defaultChannelParticipants,
   GENERAL_ASSISTANT_ID,
   mentionedBotId,
@@ -104,8 +105,23 @@ export {
   personalWorkspaceId,
   PLATFORM_ORG_ID,
   TEAM_BOT_PROFILES,
+  workspaceDefaultChannelId,
+  workspaceProjectId,
 } from './tenancy.js';
 export type { SeedParticipant, TeamBotProfile } from './tenancy.js';
+export {
+  MEMBERSHIP_STATUSES,
+  membershipIsActive,
+  parseMembershipStatus,
+  parseMembershipStatusOrActive,
+  parseWorkspaceRole,
+  WORKSPACE_ROLES,
+} from './workspace-membership.js';
+export type {
+  MembershipStatus,
+  WorkspaceMembership,
+  WorkspaceRole,
+} from './workspace-membership.js';
 export type { AguiEvent, AguiRunInput, AguiToolCall } from './ag-ui.js';
 export {
   aguiEventsToSse,

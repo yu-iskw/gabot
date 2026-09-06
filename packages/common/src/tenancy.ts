@@ -1,4 +1,5 @@
 export const PLATFORM_ORG_ID = 'org-gabot';
+export const DEFAULT_WORKSPACE_ID = 'ws-gabot';
 export const DEFAULT_CHANNEL_NAME = 'General';
 export const DEFAULT_PROJECT_NAME = 'Default';
 export const GENERAL_ASSISTANT_ID = 'general-assistant';
@@ -61,6 +62,18 @@ export function personalProjectId(userId: string): string {
 
 export function personalChannelId(userId: string): string {
   return `ch-${userId}-general`;
+}
+
+export function workspaceSlug(workspaceId: string): string {
+  return workspaceId.startsWith('ws-') ? workspaceId.slice(3) : workspaceId;
+}
+
+export function workspaceProjectId(workspaceId: string): string {
+  return `proj-${workspaceSlug(workspaceId)}`;
+}
+
+export function workspaceDefaultChannelId(workspaceId: string): string {
+  return `ch-${workspaceSlug(workspaceId)}-general`;
 }
 
 export function mentionedBotId(message: string): string | undefined {

@@ -3,6 +3,7 @@ import {
   collectText,
   collectToolCalls,
   decideScriptedTurn,
+  membershipIsActive,
   mentionedBotId,
   parseAguiSse,
   rootAuthority,
@@ -123,15 +124,22 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
   if (!participating) {
     throw new TurnClientError(`Bot ${botId} is not a participant on channel ${input.channelId}.`);
   }
-  if (input.user.id !== scope.ownerUserId) {
-    throw new TurnClientError('Only the workspace owner may start a run on this channel.');
+  const membership = await input.store.getMembership(input.user.id);
+  if (
+    !membership ||
+    !membershipIsActive(membership) ||
+    membership.workspaceId !== scope.workspaceId
+  ) {
+    throw new TurnClientError(
+      'Active workspace membership is required to start a run on this channel.',
+    );
   }
   const run = await input.store.createRun({
     workspaceId: scope.workspaceId,
     projectId: scope.projectId,
     channelId: input.channelId,
     botId,
-    ownerUserId: scope.ownerUserId,
+    ownerUserId: input.user.id,
     triggerType: 'interactive',
     status: 'queued',
     objective: input.message,
