@@ -87,3 +87,27 @@ export function workspaceRoleCanReadAudit(role: WorkspaceRole): boolean {
     }
   }
 }
+
+export function wouldLeaveZeroActiveAdmins(
+  memberships: readonly WorkspaceMembership[],
+  next: Pick<WorkspaceMembership, 'role' | 'status' | 'userId'>,
+): boolean {
+  const nextKeepsAdmin = isActiveAdmin(next.role, next.status);
+  const otherAdmins = memberships.some(
+    (row) => row.userId !== next.userId && isActiveAdmin(row.role, row.status),
+  );
+  return !nextKeepsAdmin && !otherAdmins;
+}
+
+function isActiveAdmin(role: WorkspaceRole, status: MembershipStatus): boolean {
+  switch (status) {
+    case 'active':
+      return workspaceRoleCanAdminister(role);
+    case 'revoked':
+      return false;
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
+}

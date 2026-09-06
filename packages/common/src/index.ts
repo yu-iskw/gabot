@@ -119,6 +119,7 @@ export {
   WORKSPACE_ROLES,
   workspaceRoleCanAdminister,
   workspaceRoleCanReadAudit,
+  wouldLeaveZeroActiveAdmins,
 } from './workspace-membership.js';
 export type {
   MembershipStatus,

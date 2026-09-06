@@ -182,6 +182,16 @@ export class PostgresStore implements GabotStore {
         VALUES (${channelId}, 'user', ${input.userId}, ${role})
         ON CONFLICT DO NOTHING
       `;
+    } else {
+      await this.sql`
+        DELETE FROM channel_participants p
+        USING channels c, projects proj
+        WHERE p.channel_id = c.id
+          AND c.project_id = proj.id
+          AND proj.workspace_id = ${this.workspaceId}
+          AND p.principal_type = 'user'
+          AND p.principal_id = ${input.userId}
+      `;
     }
     return membership;
   }

@@ -10,6 +10,7 @@ import {
   PROVIDER_MOCK_MCP,
   workspaceRoleCanAdminister,
   workspaceRoleCanReadAudit,
+  wouldLeaveZeroActiveAdmins,
 } from '@gabot/common';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -52,6 +53,7 @@ const INVALID_BODY = 'Invalid body';
 const FORBIDDEN = 'Forbidden';
 const HUMANS_FORBIDDEN = 'Cannot add humans as channel participants';
 const DEFAULT_CHANNEL_LOCKED = 'Cannot archive the default channel';
+const LAST_ADMIN_REQUIRED = 'Cannot remove the last admin';
 const WORKER_SECRET_HEADER = 'x-gabot-worker-secret';
 
 export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariables }> {
@@ -197,7 +199,7 @@ function registerChannelMutationRoutes(
   options: ApiOptions,
 ): void {
   app.patch('/api/channels/:id', async (context) => {
-    const owned = await requireOwnedChannel(
+    const owned = await requireManagedChannel(
       options.store,
       context.get('user'),
       context.req.param('id'),
@@ -215,7 +217,7 @@ function registerChannelMutationRoutes(
     return context.json({ channel });
   });
   app.post('/api/channels/:id/archive', async (context) => {
-    const owned = await requireOwnedChannel(
+    const owned = await requireManagedChannel(
       options.store,
       context.get('user'),
       context.req.param('id'),
@@ -230,7 +232,7 @@ function registerChannelMutationRoutes(
     return context.json({ ok: true });
   });
   app.post('/api/channels/:id/participants', async (context) => {
-    const owned = await requireOwnedChannel(
+    const owned = await requireManagedChannel(
       options.store,
       context.get('user'),
       context.req.param('id'),
@@ -256,7 +258,7 @@ function registerChannelMutationRoutes(
     return context.json({ participant }, 201);
   });
   app.delete('/api/channels/:id/participants/:agentId', async (context) => {
-    const owned = await requireOwnedChannel(
+    const owned = await requireManagedChannel(
       options.store,
       context.get('user'),
       context.req.param('id'),
@@ -291,7 +293,7 @@ function registerChannelMutationRoutes(
     return context.json({ policies: await options.store.listChannelPolicies(owned.channel.id) });
   });
   app.put('/api/channels/:id/policies', async (context) => {
-    const owned = await requireOwnedChannel(
+    const owned = await requireManagedChannel(
       options.store,
       context.get('user'),
       context.req.param('id'),
@@ -459,6 +461,16 @@ function registerProductRoutes(app: Hono<{ Variables: AuthVariables }>, options:
     const person = await options.store.getUser(userId);
     if (!person) {
       return context.json({ error: NOT_FOUND }, 404);
+    }
+    const current = await options.store.listMemberships();
+    if (
+      wouldLeaveZeroActiveAdmins(current, {
+        userId,
+        role: role.value,
+        status: status.value,
+      })
+    ) {
+      return context.json({ error: LAST_ADMIN_REQUIRED }, 400);
     }
     try {
       const membership = await options.store.upsertMembership({
@@ -824,6 +836,29 @@ async function requireOwnedChannel(
     return { ok: false, status: 404, body: { error: NOT_FOUND } };
   }
   return { ok: true, channel, workspace };
+}
+
+async function requireManagedChannel(
+  store: GabotStore,
+  user: SessionUser,
+  channelId: string,
+): Promise<
+  | { channel: ChannelRecord; ok: true; workspace: WorkspaceRecord }
+  | { body: Record<string, unknown>; ok: false; status: 403 | 404 }
+> {
+  const owned = await requireOwnedChannel(store, user, channelId);
+  if (!owned.ok) {
+    return owned;
+  }
+  const membership = await store.getMembership(user.id);
+  if (
+    !membership ||
+    !membershipIsActive(membership) ||
+    !workspaceRoleCanAdminister(membership.role)
+  ) {
+    return { ok: false, status: 403, body: { error: FORBIDDEN } };
+  }
+  return owned;
 }
 
 async function participantOrError(

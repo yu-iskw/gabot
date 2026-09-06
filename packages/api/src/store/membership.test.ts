@@ -1,3 +1,4 @@
+import { workspaceDefaultChannelId } from '@gabot/common';
 import { describe, expect, it } from 'vitest';
 
 import { MemoryStore } from './memory-store.js';
@@ -33,5 +34,7 @@ describe('workspace membership store', () => {
     await store.upsertMembership({ userId: other.id, role: 'member', status: 'revoked' });
     expect(await store.getWorkspaceForUser(other.id)).toBeNull();
     expect((await store.getMembership(other.id))?.status).toBe('revoked');
+    expect(await store.listChannels(other.id)).toEqual([]);
+    expect(await store.getChannel(workspaceDefaultChannelId('ws-gabot'), other.id)).toBeNull();
   });
 });

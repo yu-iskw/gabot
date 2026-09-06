@@ -183,6 +183,8 @@ export class MemoryStore implements GabotStore {
         principalId: input.userId,
         role: input.role === 'admin' ? 'owner' : 'member',
       });
+    } else {
+      this.forgetHumanParticipants(input.userId);
     }
     return { ...membership };
   }
@@ -1047,6 +1049,14 @@ export class MemoryStore implements GabotStore {
     if (!exists) {
       this.participants.push({ ...input });
     }
+  }
+
+  private forgetHumanParticipants(userId: string): void {
+    const remaining = this.participants.filter(
+      (row) => row.principalType !== 'user' || row.principalId !== userId,
+    );
+    this.participants.length = 0;
+    this.participants.push(...remaining);
   }
 }
 

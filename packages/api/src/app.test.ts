@@ -1546,6 +1546,72 @@ describe('workspace roles and revocation', () => {
     expect(grant.status).toBe(403);
   });
 
+  it('refuses auditor writes to channel policy and participants', async () => {
+    const { app, memberHeaders } = await memberApp('auditor');
+    const policy = await app.request(`/api/channels/${defaultChannel}/policies`, {
+      method: 'PUT',
+      headers: memberHeaders,
+      body: JSON.stringify({
+        policies: [{ capability: CAPABILITY_GITHUB_ISSUES_CREATE, resource: GITHUB_ALLOWED_REPO }],
+      }),
+    });
+    expect(policy.status).toBe(403);
+    const patched = await app.request(`/api/channels/${defaultChannel}`, {
+      method: 'PATCH',
+      headers: memberHeaders,
+      body: JSON.stringify({ description: 'ops' }),
+    });
+    expect(patched.status).toBe(403);
+    const listed = await app.request(`/api/channels/${defaultChannel}/policies`, {
+      headers: memberHeaders,
+    });
+    expect(listed.status).toBe(200);
+  });
+
+  it('hides the default channel after membership is revoked', async () => {
+    const { store, app, other, memberHeaders } = await memberApp();
+    await store.upsertMembership({ userId: other.id, role: 'member', status: 'revoked' });
+    const listed = await app.request('/api/channels', { headers: memberHeaders });
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as { channels: Array<{ id: string }> };
+    expect(body.channels.some((row) => row.id === defaultChannel)).toBe(false);
+    const messages = await app.request(`/api/channels/${defaultChannel}/messages`, {
+      headers: memberHeaders,
+    });
+    expect(messages.status).toBe(404);
+  });
+
+  it('rejects membership writes that would leave zero active admins', async () => {
+    const { app } = await memberApp();
+    const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
+    const revoked = await app.request('/api/admin/memberships', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ userId: person.id, role: 'admin', status: 'revoked' }),
+    });
+    expect(revoked.status).toBe(400);
+    const demoted = await app.request('/api/admin/memberships', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ userId: person.id, role: 'member' }),
+    });
+    expect(demoted.status).toBe(400);
+    expect((await demoted.json()) as { error?: string }).toEqual({
+      error: 'Cannot remove the last admin',
+    });
+    await app.request('/api/admin/memberships', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ userId: 'user-2', role: 'admin' }),
+    });
+    const afterSecond = await app.request('/api/admin/memberships', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ userId: person.id, role: 'member' }),
+    });
+    expect(afterSecond.status).toBe(200);
+  });
+
   it('does not let a member spend or re-grant another member owner connection', async () => {
     const { store, app, other } = await memberApp();
     const { run, workspace } = await ownerRun(store, other.id);

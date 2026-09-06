@@ -8,6 +8,7 @@ import {
   parseWorkspaceRole,
   workspaceRoleCanAdminister,
   workspaceRoleCanReadAudit,
+  wouldLeaveZeroActiveAdmins,
 } from './workspace-membership.js';
 
 describe('parseWorkspaceRole', () => {
@@ -75,5 +76,62 @@ describe('workspace roles', () => {
     expect(workspaceRoleCanReadAudit('admin')).toBe(true);
     expect(workspaceRoleCanReadAudit('auditor')).toBe(true);
     expect(workspaceRoleCanReadAudit('member')).toBe(false);
+  });
+});
+
+describe('wouldLeaveZeroActiveAdmins', () => {
+  const admin = {
+    workspaceId: 'ws-gabot',
+    userId: 'user-1',
+    role: 'admin' as const,
+    status: 'active' as const,
+  };
+  const member = {
+    workspaceId: 'ws-gabot',
+    userId: 'user-2',
+    role: 'member' as const,
+    status: 'active' as const,
+  };
+
+  it('is true when the last active admin would be demoted or revoked', () => {
+    expect(
+      wouldLeaveZeroActiveAdmins([admin, member], {
+        userId: admin.userId,
+        role: 'member',
+        status: 'active',
+      }),
+    ).toBe(true);
+    expect(
+      wouldLeaveZeroActiveAdmins([admin], {
+        userId: admin.userId,
+        role: 'admin',
+        status: 'revoked',
+      }),
+    ).toBe(true);
+  });
+
+  it('is false when another active admin remains or the next row stays admin', () => {
+    const otherAdmin = { ...admin, userId: 'user-3' };
+    expect(
+      wouldLeaveZeroActiveAdmins([admin, otherAdmin], {
+        userId: admin.userId,
+        role: 'member',
+        status: 'active',
+      }),
+    ).toBe(false);
+    expect(
+      wouldLeaveZeroActiveAdmins([admin], {
+        userId: admin.userId,
+        role: 'admin',
+        status: 'active',
+      }),
+    ).toBe(false);
+    expect(
+      wouldLeaveZeroActiveAdmins([member], {
+        userId: member.userId,
+        role: 'admin',
+        status: 'active',
+      }),
+    ).toBe(false);
   });
 });
