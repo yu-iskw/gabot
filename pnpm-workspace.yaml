@@ -26,6 +26,12 @@ minimumReleaseAgeExclude:
   - nanoid@3.3.18
   - browserslist@4.28.7
   - '@humanfs/node@0.16.8'
+  # Urgent OSV patches (SBOM / lint:security); published within the 7-day quarantine.
+  - undici@6.28.1
+  - undici@7.29.1
+  - qs@6.16.0
+  # Already locked; re-resolve for overrides re-checks maturity.
+  - '@copilotkit/runtime@1.70.1'
   # Vite → rolldown optional native bindings (freshly published as a set).
   - rolldown
   - '@rolldown/binding-android-arm-eabi'
@@ -45,6 +51,10 @@ minimumReleaseAgeExclude:
   - '@rolldown/binding-win32-x64-msvc'
 
 overrides:
+  # OSV: undici 5.29.0 GHSA suite (WebSocket/DoS/injection). No fixed 5.x; lift to patched 6.x.
+  undici@5: 6.28.1
+  # OSV: qs DoS / array-limit (GHSA-4mjr-xmp4-gh2g, GHSA-x5fp-wj9c-mxmx)
+  qs@6.15.3: 6.16.0
   # GHSA-r292-9mhp-454m fixed in 7.5.21+
   # GHSA-rgw5-rvv9-x895 fixed in 5.0.9+
   brace-expansion: 5.0.9
