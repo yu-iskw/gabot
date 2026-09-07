@@ -31,7 +31,12 @@ import {
   settleRun as settleRunTx,
 } from './postgres-run-lease.js';
 import { parseEnvelope, toRunRecord, type DbRun } from './postgres-run-map.js';
-import { PROTECTED_AGENT_ID, PROJECT_NOT_FOUND, WORKSPACE_NOT_FOUND } from './types.js';
+import {
+  PROTECTED_AGENT_ID,
+  PROJECT_NOT_FOUND,
+  WORK_LEASE_MS,
+  WORKSPACE_NOT_FOUND,
+} from './types.js';
 
 import type {
   AcquireRunInput,
@@ -460,7 +465,7 @@ export class PostgresStore implements GabotStore {
     return this.sql<WorkRecord[]>`
       UPDATE work_items AS w
       SET claimed_by = ${workerId},
-          lease_until = ${now} + interval '5 minutes',
+          lease_until = ${new Date(now.getTime() + WORK_LEASE_MS)},
           attempts = w.attempts + 1,
           updated_at = now()
       FROM (

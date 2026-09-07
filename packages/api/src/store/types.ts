@@ -248,57 +248,37 @@ export class DelegationBudgetError extends Error {
   }
 }
 
-/** Work kind shared by child admission and root admission. */
 export const RUN_EXECUTE_KIND = 'run.execute';
-
-/** One lease length for admit, acquire, renew, and claimWork. */
 export const WORK_LEASE_MS = 5 * 60_000;
-
-/** `runs.error` and `work_items.last_error` written when acquireRun reaps a lost executor. */
 export const RUN_LEASE_LOST = 'Executor lease lost while running.';
 
-/** Who holds `work_items(run.execute, key = run.id)` and until when. A lock token, not an identity. */
+/** Lock token on `work_items(run.execute, key = run.id)`, not an identity. */
 export type RunLease = {
   executorId: string;
   leaseUntil: Date;
 };
 
-/**
- * Everything executeTurn knows after its refusals (bot, channel scope, participant, membership).
- * Persisted in one transaction by admitRootRun.
- */
 export type RootRunAdmission = {
   authority: AuthorityEnvelope;
   botId: string;
   channelId: string;
-  /** Lands in work_items.claimed_by. The HTTP executor claims the row it is about to run. */
   executorId: string;
-  /** runs.objective and the role:'user' message content. */
   message: string;
   now?: Date;
   ownerUserId: string;
   projectId: string;
-  /** 'delegation' is written only by createDelegatedChild. */
   triggerType: Exclude<RunTriggerType, 'delegation'>;
   workspaceId: string;
 };
 
 export type AdmittedRun = {
   lease: RunLease;
-  /** status 'queued', depth 0, rootRunId === id. */
   run: RunRecord;
 };
 
 /**
- * Result of acquireRun. Exactly one of these per call.
- *
- * - started: CAS queued→running succeeded; caller holds the lease and executes.
- * - lost: run was 'running' and no live foreign lease protected it. The store already wrote
- *   status 'failed' (error RUN_LEASE_LOST), finished the work row, and appended run.failed
- *   or agent.delegation.failed. Caller must not execute.
- * - busy: another executor holds a live lease. No-op.
- * - terminal: succeeded | failed | cancelled. No-op.
- * - missing: no such run.
+ * `lost` means the store already wrote status failed (RUN_LEASE_LOST) and the failure
+ * event; the caller must not execute.
  */
 export type RunAcquisition =
   | { lease: RunLease; outcome: 'started'; run: RunRecord }
@@ -460,11 +440,7 @@ export type GabotStore = {
   listRunsForChannel(channelId: string): Promise<RunRecord[]>;
   createDelegatedChild(input: DelegatedChildInput): Promise<RunRecord>;
   listDelegationsForParent(parentRunId: string): Promise<DelegationRecord[]>;
-  /**
-   * One transaction: queued run + user message (+ channels.last_message) +
-   * message.user + run.started + claimed work_items(kind = RUN_EXECUTE_KIND, key = run.id).
-   * Root counterpart of createDelegatedChild. Never leaves a queued root without a lapsing lease.
-   */
+  /** Root counterpart of createDelegatedChild. Never leaves a queued root without a lapsing lease. */
   admitRootRun(input: RootRunAdmission): Promise<AdmittedRun>;
   /**
    * Lock order is always runs then work_items. The only way a run goes queued → running.
@@ -474,8 +450,7 @@ export type GabotStore = {
   /** Heartbeat at effect boundaries. null means this executor no longer owns the run. */
   renewRunLease(input: RenewRunLeaseInput): Promise<RunLease | null>;
   /**
-   * The only way a run leaves 'running'. Returns null when fenced out (wrong holder,
-   * already finished, or not running); callers must not report success.
+   * The only way a run leaves 'running'. Null means fenced out; callers must not report success.
    */
   settleRun(input: SettleRunInput): Promise<RunRecord | null>;
 };

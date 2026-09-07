@@ -23,7 +23,7 @@ import { SCHEMA_SQL } from './db/schema-sql.js';
 import * as schema from './db/schema.js';
 import { runGatewayAction } from './gateway.js';
 import { MemoryStore } from './store/memory-store.js';
-import { RUN_LEASE_LOST } from './store/types.js';
+import { RUN_EXECUTE_KIND, RUN_LEASE_LOST } from './store/types.js';
 import { createScriptedAgentRunner, executeRun, executeTurn } from './turns.js';
 
 import type { VerifiedPerson } from '@gabot/common';
@@ -716,7 +716,7 @@ describe('turns and runs', () => {
       triggerType: 'interactive',
     });
     const lost = await store.claimWork('dead', 10);
-    expect(lost[0]?.kind).toBe('run.execute');
+    expect(lost[0]?.kind).toBe(RUN_EXECUTE_KIND);
     const later = new Date(Date.now() + 6 * 60_000);
     const reclaimed = await store.claimWork('alive', 10, later);
     expect(reclaimed).toHaveLength(1);
@@ -1826,7 +1826,7 @@ async function drainRuns(deps: ReturnType<typeof scriptedDeps>): Promise<void> {
   for (let step = 0; step < 8; step += 1) {
     const executorId = `drain-${String(step)}`;
     const items = await deps.store.claimWork(executorId, 10);
-    const jobs = items.filter((item) => item.kind === 'run.execute');
+    const jobs = items.filter((item) => item.kind === RUN_EXECUTE_KIND);
     if (jobs.length === 0) {
       return;
     }

@@ -81,31 +81,20 @@ async function writeAdmittedRootRun(sql: TxSql, input: RootRunAdmission): Promis
     WHERE id = ${input.channelId}
   `;
 
-  const userEventId = crypto.randomUUID();
   await sql`
     INSERT INTO channel_events (id, channel_id, run_id, type, actor_type, actor_id, payload)
-    VALUES (
-      ${userEventId}, ${input.channelId}, ${id}, ${'message.user'},
-      ${'user'}, ${input.ownerUserId}, ${JSON.stringify({ message: input.message })}::jsonb
-    )
-  `;
-  const startedEventId = crypto.randomUUID();
-  await sql`
-    INSERT INTO channel_events (id, channel_id, run_id, type, actor_type, actor_id, payload)
-    VALUES (
-      ${startedEventId}, ${input.channelId}, ${id}, ${'run.started'},
-      ${'bot'}, ${input.botId}, ${JSON.stringify({ trigger: input.triggerType })}::jsonb
-    )
+    VALUES
+      (
+        ${crypto.randomUUID()}, ${input.channelId}, ${id}, ${'message.user'},
+        ${'user'}, ${input.ownerUserId}, ${JSON.stringify({ message: input.message })}::jsonb
+      ),
+      (
+        ${crypto.randomUUID()}, ${input.channelId}, ${id}, ${'run.started'},
+        ${'bot'}, ${input.botId}, ${JSON.stringify({ trigger: input.triggerType })}::jsonb
+      )
   `;
 
-  await sql`
-    INSERT INTO work_items (kind, key, run_at, payload, claimed_by, lease_until, attempts)
-    VALUES (
-      ${RUN_EXECUTE_KIND}, ${id}, ${now}, ${JSON.stringify({ runId: id })}::jsonb,
-      ${input.executorId}, ${now} + interval '5 minutes', ${1}
-    )
-    ON CONFLICT (kind, key) DO NOTHING
-  `;
+  await insertClaimedExecuteWork(sql, id, input.executorId, now, true);
 
   return {
     run: toRunRecord(row),
@@ -139,6 +128,35 @@ async function performAcquireRun(sql: TxSql, input: AcquireRunInput): Promise<Ru
   return reapRunningRun(sql, run, now);
 }
 
+async function insertClaimedExecuteWork(
+  sql: TxSql,
+  runId: string,
+  executorId: string,
+  now: Date,
+  onConflictDoNothing: boolean,
+): Promise<void> {
+  const leaseUntil = leaseUntilOf(now);
+  const payload = JSON.stringify({ runId });
+  if (onConflictDoNothing) {
+    await sql`
+      INSERT INTO work_items (kind, key, run_at, payload, claimed_by, lease_until, attempts)
+      VALUES (
+        ${RUN_EXECUTE_KIND}, ${runId}, ${now}, ${payload}::jsonb,
+        ${executorId}, ${leaseUntil}, ${1}
+      )
+      ON CONFLICT (kind, key) DO NOTHING
+    `;
+    return;
+  }
+  await sql`
+    INSERT INTO work_items (kind, key, run_at, payload, claimed_by, lease_until, attempts)
+    VALUES (
+      ${RUN_EXECUTE_KIND}, ${runId}, ${now}, ${payload}::jsonb,
+      ${executorId}, ${leaseUntil}, ${1}
+    )
+  `;
+}
+
 async function lockRunRow(sql: TxSql, runId: string): Promise<DbRun | undefined> {
   const rows = await sql<DbRun[]>`
     SELECT id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
@@ -167,20 +185,14 @@ async function startQueuedRun(
     await sql`
       UPDATE work_items
       SET claimed_by = ${input.executorId},
-          lease_until = ${now} + interval '5 minutes',
+          lease_until = ${leaseUntilOf(now)},
           finished_at = ${null},
           attempts = attempts + CASE WHEN claimed_by = ${input.executorId} THEN 0 ELSE 1 END,
           updated_at = now()
       WHERE kind = ${RUN_EXECUTE_KIND} AND key = ${input.runId}
     `;
   } else {
-    await sql`
-      INSERT INTO work_items (kind, key, run_at, payload, claimed_by, lease_until, attempts)
-      VALUES (
-        ${RUN_EXECUTE_KIND}, ${input.runId}, ${now}, ${JSON.stringify({ runId: input.runId })}::jsonb,
-        ${input.executorId}, ${now} + interval '5 minutes', ${1}
-      )
-    `;
+    await insertClaimedExecuteWork(sql, input.runId, input.executorId, now, false);
   }
   const updatedRows = await sql<DbRun[]>`
     UPDATE runs
@@ -238,7 +250,7 @@ export async function renewRunLease(sql: Sql, input: RenewRunLeaseInput): Promis
   const now = input.now ?? new Date();
   const rows = await sql<{ key: string }[]>`
     UPDATE work_items w
-    SET lease_until = ${now} + interval '5 minutes', updated_at = now()
+    SET lease_until = ${leaseUntilOf(now)}, updated_at = now()
     FROM runs r
     WHERE w.kind = ${RUN_EXECUTE_KIND} AND w.key = ${input.runId}
       AND w.claimed_by = ${input.executorId}

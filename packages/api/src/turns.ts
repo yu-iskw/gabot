@@ -82,6 +82,8 @@ type TurnDeps = {
   user: SessionUser;
 };
 
+type HeldTurn = TurnDeps & { executorId: string };
+
 type TurnInput = TurnDeps & {
   botId?: string;
   channelId: string;
@@ -139,9 +141,10 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
     input.botId ??
     mentionedBotId(input.message) ??
     (await defaultParticipantBotId(input.store, input.channelId));
-  const [scope, participating] = await Promise.all([
+  const [scope, participating, membership] = await Promise.all([
     input.store.getChannelScope(input.channelId),
     input.store.isChannelParticipant(input.channelId, 'bot', botId),
+    input.store.getMembership(input.user.id),
   ]);
   if (!scope) {
     throw new TurnClientError(`Channel ${input.channelId} is not in a workspace project.`);
@@ -149,7 +152,6 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
   if (!participating) {
     throw new TurnClientError(`Bot ${botId} is not a participant on channel ${input.channelId}.`);
   }
-  const membership = await input.store.getMembership(input.user.id);
   if (!membershipCoversWorkspace(membership, scope.workspaceId)) {
     throw new TurnClientError(
       'Active workspace membership is required to start a run on this channel.',
@@ -181,7 +183,7 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
 const TERMINAL_RUN_STATUSES = new Set<RunRecord['status']>(['succeeded', 'cancelled', 'failed']);
 
 export async function executeRun(input: ExecuteRunInput): Promise<TurnResult> {
-  const executorId = input.executorId ?? processExecutorId();
+  const held: HeldTurn = { ...input, executorId: input.executorId ?? processExecutorId() };
   const preview = input.run ?? (await input.store.getRun(input.runId));
   if (!preview) {
     throw new Error(`Run ${input.runId} not found.`);
@@ -193,49 +195,40 @@ export async function executeRun(input: ExecuteRunInput): Promise<TurnResult> {
   if (!membershipCoversWorkspace(membership, preview.workspaceId)) {
     throw new TurnClientError('Active workspace membership is required to execute this run.');
   }
-  const acquired = await input.store.acquireRun({ runId: preview.id, executorId });
+  const acquired = await input.store.acquireRun({ runId: preview.id, executorId: held.executorId });
   if (acquired.outcome === 'missing') {
     throw new Error(`Run ${input.runId} not found.`);
   }
   if (acquired.outcome !== 'started') {
     return { outcome: acquired.outcome, runId: preview.id, text: '', toolNames: [] };
   }
-  return runToCompletion(input, acquired.run, executorId);
+  return runToCompletion(held, acquired.run);
 }
 
-async function runToCompletion(
-  input: TurnDeps,
-  run: RunRecord,
-  executorId: string,
-): Promise<TurnResult> {
+async function runToCompletion(input: HeldTurn, run: RunRecord): Promise<TurnResult> {
   try {
-    return await completeRun(input, run, executorId);
+    return await completeRun(input, run);
   } catch (error) {
     if (isRunFenced(error)) {
       throw error;
     }
-    await settleFailedRun(input.store, run, executorId, error);
+    await settleFailedRun(input, run, error);
     throw error;
   }
 }
 
-async function settleFailedRun(
-  store: GabotStore,
-  run: RunRecord,
-  executorId: string,
-  error: unknown,
-): Promise<void> {
+async function settleFailedRun(input: HeldTurn, run: RunRecord, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : 'run failed';
-  const settled = await store.settleRun({
+  const settled = await input.store.settleRun({
     runId: run.id,
-    executorId,
+    executorId: input.executorId,
     status: 'failed',
     error: message,
   });
   if (!settled) {
     return;
   }
-  await recordRunEvent(store, {
+  await recordRunEvent(input.store, {
     run,
     type: run.parentRunId ? 'agent.delegation.failed' : 'run.failed',
     actorType: 'bot',
@@ -244,11 +237,7 @@ async function settleFailedRun(
   });
 }
 
-async function completeRun(
-  input: TurnDeps,
-  run: RunRecord,
-  executorId: string,
-): Promise<TurnResult> {
+async function completeRun(input: HeldTurn, run: RunRecord): Promise<TurnResult> {
   const [threadId, seeded] = await Promise.all([
     input.store.mintThread(run.ownerUserId, run.channelId),
     messagesForRun(input.store, run),
@@ -257,7 +246,7 @@ async function completeRun(
   let text = '';
   let current = seeded;
   for (let step = 0; step < 4; step += 1) {
-    await assertHeld(input.store, run, executorId);
+    await assertHeld(input, run);
     const events = await input.agent.run({
       threadId,
       runId: run.id,
@@ -273,7 +262,7 @@ async function completeRun(
     if (calls.length === 0) {
       break;
     }
-    current = await applyToolCalls({ input, run, messages: current, calls, toolNames, executorId });
+    current = await applyToolCalls({ input, run, messages: current, calls, toolNames });
   }
   if (text) {
     await input.store.appendMessage({
@@ -285,7 +274,7 @@ async function completeRun(
   }
   const settled = await input.store.settleRun({
     runId: run.id,
-    executorId,
+    executorId: input.executorId,
     status: 'succeeded',
   });
   if (!settled) {
@@ -309,8 +298,8 @@ async function completeRun(
   return { outcome: 'executed', runId: run.id, text, toolNames };
 }
 
-async function assertHeld(store: GabotStore, run: RunRecord, executorId: string): Promise<void> {
-  const lease = await store.renewRunLease({ runId: run.id, executorId });
+async function assertHeld(input: HeldTurn, run: RunRecord): Promise<void> {
+  const lease = await input.store.renewRunLease({ runId: run.id, executorId: input.executorId });
   if (!lease) {
     throw new RunFencedError(run.id);
   }
@@ -336,13 +325,12 @@ async function messagesForRun(
 
 async function applyToolCalls(options: {
   calls: AguiToolCall[];
-  executorId: string;
-  input: TurnDeps;
+  input: HeldTurn;
   messages: AguiRunInput['messages'];
   run: RunRecord;
   toolNames: string[];
 }): Promise<AguiRunInput['messages']> {
-  const { input, run, messages, calls, toolNames, executorId } = options;
+  const { input, run, messages, calls, toolNames } = options;
   let next = [...messages];
   for (const call of calls) {
     toolNames.push(call.name);
@@ -353,7 +341,7 @@ async function applyToolCalls(options: {
       actorId: run.botId,
       payload: { tool: call.name },
     });
-    await assertHeld(input.store, run, executorId);
+    await assertHeld(input, run);
     const result = await runGatewayAction({
       store: input.store,
       mcpUrl: input.mcpUrl,

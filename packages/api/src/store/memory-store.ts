@@ -441,7 +441,7 @@ export class MemoryStore implements GabotStore {
         continue;
       }
       row.claimedBy = workerId;
-      row.leaseUntil = new Date(now.getTime() + 5 * 60_000);
+      row.leaseUntil = leaseUntilOf(now);
       row.attempts += 1;
       claimed.push({ kind: row.kind, key: row.key, payload: row.payload, attempts: row.attempts });
     }
@@ -835,21 +835,7 @@ export class MemoryStore implements GabotStore {
       createdAt: now,
     });
 
-    const leaseUntil = new Date(now.getTime() + WORK_LEASE_MS);
-    if (!this.work.some((row) => row.kind === RUN_EXECUTE_KIND && row.key === id)) {
-      this.work.push({
-        kind: RUN_EXECUTE_KIND,
-        key: id,
-        payload: { runId: id },
-        runAt: now,
-        claimedBy: input.executorId,
-        leaseUntil,
-        attempts: 1,
-        finishedAt: null,
-        lastError: null,
-      });
-    }
-
+    const leaseUntil = this.claimExecuteWork(id, input.executorId, now);
     return { run: cloneRun(run), lease: { executorId: input.executorId, leaseUntil } };
   }
 
@@ -862,7 +848,7 @@ export class MemoryStore implements GabotStore {
     if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled') {
       return { outcome: 'terminal', run: cloneRun(run) };
     }
-    const work = this.work.find((row) => row.kind === RUN_EXECUTE_KIND && row.key === input.runId);
+    const work = this.executeWork(input.runId);
     if (heldByOther(work, input.executorId, now)) {
       return { outcome: 'busy', run: cloneRun(run) };
     }
@@ -878,11 +864,11 @@ export class MemoryStore implements GabotStore {
     if (!run || run.status !== 'running') {
       return null;
     }
-    const work = this.work.find((row) => row.kind === RUN_EXECUTE_KIND && row.key === input.runId);
+    const work = this.executeWork(input.runId);
     if (!work || work.claimedBy !== input.executorId || work.finishedAt !== null) {
       return null;
     }
-    const leaseUntil = new Date(now.getTime() + WORK_LEASE_MS);
+    const leaseUntil = leaseUntilOf(now);
     work.leaseUntil = leaseUntil;
     return { executorId: input.executorId, leaseUntil };
   }
@@ -893,7 +879,7 @@ export class MemoryStore implements GabotStore {
     if (!run || run.status !== 'running') {
       return null;
     }
-    const work = this.work.find((row) => row.kind === RUN_EXECUTE_KIND && row.key === input.runId);
+    const work = this.executeWork(input.runId);
     if (work && (work.claimedBy !== input.executorId || work.finishedAt !== null)) {
       return null;
     }
@@ -1043,25 +1029,35 @@ export class MemoryStore implements GabotStore {
     this.routines.push(routine);
   }
 
+  private executeWork(runId: string): WorkRow | undefined {
+    return this.work.find((row) => row.kind === RUN_EXECUTE_KIND && row.key === runId);
+  }
+
+  private claimExecuteWork(runId: string, executorId: string, now: Date): Date {
+    const leaseUntil = leaseUntilOf(now);
+    this.work.push({
+      kind: RUN_EXECUTE_KIND,
+      key: runId,
+      payload: { runId },
+      runAt: now,
+      claimedBy: executorId,
+      leaseUntil,
+      attempts: 1,
+      finishedAt: null,
+      lastError: null,
+    });
+    return leaseUntil;
+  }
+
   private startQueuedRun(
     run: RunRecord,
     work: WorkRow | undefined,
     executorId: string,
     now: Date,
   ): RunAcquisition {
-    const leaseUntil = new Date(now.getTime() + WORK_LEASE_MS);
+    let leaseUntil = leaseUntilOf(now);
     if (!work) {
-      this.work.push({
-        kind: RUN_EXECUTE_KIND,
-        key: run.id,
-        payload: { runId: run.id },
-        runAt: now,
-        claimedBy: executorId,
-        leaseUntil,
-        attempts: 1,
-        finishedAt: null,
-        lastError: null,
-      });
+      leaseUntil = this.claimExecuteWork(run.id, executorId, now);
     } else {
       work.attempts += work.claimedBy === executorId ? 0 : 1;
       work.claimedBy = executorId;
@@ -1237,6 +1233,10 @@ export class MemoryStore implements GabotStore {
     this.participants.length = 0;
     this.participants.push(...remaining);
   }
+}
+
+function leaseUntilOf(now: Date): Date {
+  return new Date(now.getTime() + WORK_LEASE_MS);
 }
 
 function isClaimable(row: WorkRow, now: Date): boolean {
