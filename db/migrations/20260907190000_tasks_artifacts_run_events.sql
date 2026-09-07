@@ -60,5 +60,9 @@ CREATE TABLE outbox (
   delivered_at TIMESTAMPTZ
 );
 
-ALTER TABLE runs ADD COLUMN task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL;
+ALTER TABLE runs ADD COLUMN task_id TEXT;
+ALTER TABLE runs
+  ADD CONSTRAINT runs_task_id_fkey
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE runs VALIDATE CONSTRAINT runs_task_id_fkey;
 CREATE INDEX runs_task_idx ON runs (task_id);

@@ -51,6 +51,7 @@ describe('atlas bootstrap migration', () => {
     expect(tasksMigration).toContain('CREATE TABLE run_events');
     expect(tasksMigration).toContain('CREATE TABLE outbox');
     expect(tasksMigration).toContain('ALTER TABLE runs ADD COLUMN task_id');
+    expect(tasksMigration).toContain('VALIDATE CONSTRAINT runs_task_id_fkey');
     expect(atlasSum).toContain('20260907190000_tasks_artifacts_run_events.sql');
   });
 });
