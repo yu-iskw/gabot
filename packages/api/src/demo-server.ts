@@ -82,8 +82,13 @@ async function pollWork(): Promise<void> {
       await store.finishWork(item.kind, item.key);
       continue;
     }
-    const runIdRaw = item.payload.runId ?? item.key;
-    const runId = typeof runIdRaw === 'string' ? runIdRaw : String(runIdRaw);
+    const runIdRaw = item.payload.runId;
+    const runId =
+      typeof runIdRaw === 'string'
+        ? runIdRaw
+        : typeof runIdRaw === 'number' || typeof runIdRaw === 'boolean'
+          ? String(runIdRaw)
+          : item.key;
     const response = await fetch(`${apiUrl}/api/internal/runs/execute`, {
       method: 'POST',
       headers: {
