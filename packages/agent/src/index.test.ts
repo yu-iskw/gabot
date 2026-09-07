@@ -1,29 +1,30 @@
+import { EventType } from '@ag-ui/core';
 import { isA2AAgentCard } from '@gabot/common';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createAgentApp, MASTRA_INSTRUCTIONS } from './index.js';
 
 describe('mastra agent', () => {
   it('serves an A2A agent card', async () => {
-    const app = createAgentApp({ modelBaseUrl: 'http://model/v1', publicUrl: 'http://agent:4200' });
+    const app = createAgentApp({ publicUrl: 'http://agent:4200' });
     const response = await app.request('/.well-known/agent-card.json');
     const card: unknown = await response.json();
     expect(isA2AAgentCard(card)).toBe(true);
     expect(MASTRA_INSTRUCTIONS).toContain('Mastra');
   });
 
-  it('streams AG-UI from the model port', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            choices: [{ message: { content: 'Hello from gabot.', tool_calls: [] } }],
-          }),
-      }),
-    );
-    const app = createAgentApp({ modelBaseUrl: 'http://model/v1', publicUrl: 'http://agent:4200' });
+  it('streams AG-UI from a Mastra completeTurn seam', async () => {
+    const app = createAgentApp({
+      publicUrl: 'http://agent:4200',
+      completeTurn: (input) =>
+        Promise.resolve([
+          { type: EventType.RUN_STARTED, threadId: input.threadId, runId: input.runId },
+          { type: EventType.TEXT_MESSAGE_START, messageId: 'm1', role: 'assistant' },
+          { type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'm1', delta: 'Hello from gabot.' },
+          { type: EventType.TEXT_MESSAGE_END, messageId: 'm1' },
+          { type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId },
+        ]),
+    });
     const response = await app.request('/ag-ui', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -36,6 +37,5 @@ describe('mastra agent', () => {
     });
     const payload = await response.text();
     expect(payload).toContain('TEXT_MESSAGE_CONTENT');
-    vi.unstubAllGlobals();
   });
 });

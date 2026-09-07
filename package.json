@@ -29,7 +29,9 @@
     "coverage": "pnpm --filter @gabot/common build && vitest run --coverage",
     "coverage:watch": "vitest --coverage",
     "compose:up": "docker compose -f compose/docker-compose.yml up -d --wait",
-    "compose:down": "docker compose -f compose/docker-compose.yml down --remove-orphans"
+    "compose:up:vertex": "docker compose -f compose/docker-compose.yml -f compose/vertex.yml up -d --wait",
+    "compose:down": "docker compose -f compose/docker-compose.yml down --remove-orphans",
+    "test:e2e:live-gemini": "pnpm --filter @gabot/e2e test:live-gemini"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",

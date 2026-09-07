@@ -1,6 +1,7 @@
 export const DEFAULT_MAX_DELEGATION_DEPTH = 3;
 export const DEFAULT_MAX_CHILD_RUNS = 8;
 export const DEFAULT_MAX_RUNS_PER_ROOT = 16;
+export const DEFAULT_MODEL_STEPS_PER_RUN = 4;
 
 export type AuthorityEnvelope = {
   allowedTools: string[];
@@ -19,6 +20,34 @@ export type DelegationBudget = {
   maxRunsPerRoot?: number;
   rootRunCount: number;
 };
+
+export function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return parsed;
+}
+
+export function configuredMaxDelegationDepth(): number {
+  return readPositiveIntEnv('GABOT_MAX_DELEGATION_DEPTH', DEFAULT_MAX_DELEGATION_DEPTH);
+}
+
+export function configuredMaxChildRuns(): number {
+  return readPositiveIntEnv('GABOT_MAX_CHILD_RUNS', DEFAULT_MAX_CHILD_RUNS);
+}
+
+export function configuredMaxRunsPerRoot(): number {
+  return readPositiveIntEnv('GABOT_MAX_RUNS_PER_ROOT', DEFAULT_MAX_RUNS_PER_ROOT);
+}
+
+export function configuredModelStepsPerRun(): number {
+  return readPositiveIntEnv('GABOT_MODEL_STEPS_PER_RUN', DEFAULT_MODEL_STEPS_PER_RUN);
+}
 
 export function rootAuthority(allowedTools: readonly string[]): AuthorityEnvelope {
   return { allowedTools: uniqueTools(allowedTools) };
@@ -52,9 +81,9 @@ export function runMayInvoke(envelope: AuthorityEnvelope, toolName: string): boo
 }
 
 export function assertDelegationBudget(input: DelegationBudget): BudgetResult {
-  const maxDepth = input.maxDepth ?? DEFAULT_MAX_DELEGATION_DEPTH;
-  const maxChildRuns = input.maxChildRuns ?? DEFAULT_MAX_CHILD_RUNS;
-  const maxRunsPerRoot = input.maxRunsPerRoot ?? DEFAULT_MAX_RUNS_PER_ROOT;
+  const maxDepth = input.maxDepth ?? configuredMaxDelegationDepth();
+  const maxChildRuns = input.maxChildRuns ?? configuredMaxChildRuns();
+  const maxRunsPerRoot = input.maxRunsPerRoot ?? configuredMaxRunsPerRoot();
   if (input.depth >= maxDepth) {
     return {
       ok: false,

@@ -1,0 +1,41 @@
+# Vertex Gemini overlay for local Compose (dual-track).
+# Default compose stays on scripted-model. This overlay switches the agent to
+# Mastra + @ai-sdk/google-vertex and raises delegation budgets for 20+ hop
+# auto-collaboration checks.
+#
+# Prerequisites:
+#   gcloud auth application-default login
+#   ADC can call Vertex AI in project ubie-yu-sandbox
+#
+# Launch:
+#   docker compose -f compose/docker-compose.yml -f compose/vertex.yml up -d --wait
+#
+# Auth: mount host ADC into the node user home (Dockerfile USER node).
+
+services:
+  agent:
+    environment:
+      GABOT_MODEL_PROVIDER: google-vertex
+      GOOGLE_VERTEX_PROJECT: ${GOOGLE_VERTEX_PROJECT:-ubie-yu-sandbox}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_VERTEX_PROJECT:-ubie-yu-sandbox}
+      GOOGLE_VERTEX_LOCATION: ${GOOGLE_VERTEX_LOCATION:-global}
+      GABOT_VERTEX_MODEL: ${GABOT_VERTEX_MODEL:-gemini-2.5-flash}
+      GOOGLE_APPLICATION_CREDENTIALS: /home/node/.config/gcloud/application_default_credentials.json
+      # Enough budget for 20+ turn monitor↔triage↔coder relays.
+      GABOT_MAX_DELEGATION_DEPTH: ${GABOT_MAX_DELEGATION_DEPTH:-32}
+      GABOT_MAX_CHILD_RUNS: ${GABOT_MAX_CHILD_RUNS:-24}
+      GABOT_MAX_RUNS_PER_ROOT: ${GABOT_MAX_RUNS_PER_ROOT:-48}
+      GABOT_MODEL_STEPS_PER_RUN: ${GABOT_MODEL_STEPS_PER_RUN:-8}
+    volumes:
+      - ${HOME}/.config/gcloud:/home/node/.config/gcloud:ro
+    # Live Vertex; scripted-model is unused but can stay healthy for other services.
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  api:
+    environment:
+      GABOT_MAX_DELEGATION_DEPTH: ${GABOT_MAX_DELEGATION_DEPTH:-32}
+      GABOT_MAX_CHILD_RUNS: ${GABOT_MAX_CHILD_RUNS:-24}
+      GABOT_MAX_RUNS_PER_ROOT: ${GABOT_MAX_RUNS_PER_ROOT:-48}
+      GABOT_MODEL_STEPS_PER_RUN: ${GABOT_MODEL_STEPS_PER_RUN:-8}

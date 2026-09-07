@@ -82,19 +82,23 @@ export function mentionedBotId(message: string): string | undefined {
 }
 
 export function botIdentityContent(botId: string): string {
-  return `You are ${botId}.`;
+  const profile = TEAM_BOT_PROFILES.find((bot) => bot.id === botId);
+  const role = profile?.roleDescription ?? 'Helps with governed coworker tasks.';
+  const teammates = TEAM_BOT_PROFILES.map((bot) => `@${bot.id}`).join(', ');
+  return [
+    `You are ${botId}.`,
+    `Role: ${role}`,
+    `Teammates in this channel: ${teammates}.`,
+    'Collaborate by calling delegate_to_bot with a concrete objective.',
+    'Prefer multi-hop auto-collaboration over asking a human unless blocked.',
+    'Keep delegating until the objective is complete or the budget refuses further hops.',
+  ].join(' ');
 }
 
 export function parseBotIdentityContent(content: string): string | undefined {
-  const sample = botIdentityContent('\0');
-  const marker = sample.indexOf('\0');
-  const prefix = sample.slice(0, marker);
-  const suffix = sample.slice(marker + 1);
-  if (!content.startsWith(prefix) || !content.endsWith(suffix)) {
-    return undefined;
-  }
-  const id = content.slice(prefix.length, content.length - suffix.length).trim();
-  return id.length > 0 ? id : undefined;
+  const match = /^You are ([a-z][a-z0-9-]*)\./i.exec(content.trim());
+  const id = match?.[1]?.toLowerCase();
+  return id && id.length > 0 ? id : undefined;
 }
 
 export function defaultChannelParticipants(

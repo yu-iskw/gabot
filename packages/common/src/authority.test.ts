@@ -66,7 +66,23 @@ describe('assertDelegationBudget', () => {
   });
 
   it('refuses too many children or root runs', () => {
-    expect(assertDelegationBudget({ depth: 0, childCount: 8, rootRunCount: 1 }).ok).toBe(false);
-    expect(assertDelegationBudget({ depth: 0, childCount: 0, rootRunCount: 16 }).ok).toBe(false);
+    expect(
+      assertDelegationBudget({
+        depth: 0,
+        childCount: 8,
+        rootRunCount: 1,
+        maxChildRuns: 8,
+        maxRunsPerRoot: 16,
+      }).ok,
+    ).toBe(false);
+    expect(
+      assertDelegationBudget({
+        depth: 0,
+        childCount: 0,
+        rootRunCount: 16,
+        maxChildRuns: 8,
+        maxRunsPerRoot: 16,
+      }).ok,
+    ).toBe(false);
   });
 });

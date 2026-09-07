@@ -6,7 +6,8 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test --grep-invert @live-gemini",
+    "test:live-gemini": "playwright test --grep @live-gemini"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1"

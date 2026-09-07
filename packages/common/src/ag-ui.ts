@@ -1,15 +1,9 @@
-type AguiRole = 'assistant';
+import { EventType } from '@ag-ui/core';
+import { EventEncoder } from '@ag-ui/encoder';
 
-export type AguiEvent =
-  | { type: 'RUN_STARTED'; threadId: string; runId: string }
-  | { type: 'RUN_FINISHED'; threadId: string; runId: string }
-  | { type: 'RUN_ERROR'; message: string }
-  | { type: 'TEXT_MESSAGE_START'; messageId: string; role: AguiRole }
-  | { type: 'TEXT_MESSAGE_CONTENT'; messageId: string; delta: string }
-  | { type: 'TEXT_MESSAGE_END'; messageId: string }
-  | { type: 'TOOL_CALL_START'; toolCallId: string; toolCallName: string; parentMessageId: string }
-  | { type: 'TOOL_CALL_ARGS'; toolCallId: string; delta: string }
-  | { type: 'TOOL_CALL_END'; toolCallId: string };
+import type { BaseEvent, Message, RunAgentInput, Tool } from '@ag-ui/core';
+
+export type AguiEvent = BaseEvent;
 
 export type AguiToolCall = {
   id: string;
@@ -17,6 +11,7 @@ export type AguiToolCall = {
   arguments: Record<string, unknown>;
 };
 
+/** Gabot control-plane run input; convert with `toRunAgentInput` at AG-UI boundaries. */
 export type AguiRunInput = {
   threadId: string;
   runId: string;
@@ -30,8 +25,10 @@ export type AguiRunInput = {
   tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
 };
 
+const encoder = new EventEncoder();
+
 export function encodeAguiSse(event: AguiEvent): string {
-  return `data: ${JSON.stringify(event)}\n\n`;
+  return encoder.encodeSSE(event);
 }
 
 export function aguiEventsToSse(events: AguiEvent[]): string {
@@ -55,9 +52,7 @@ export function parseAguiSse(payload: string): AguiEvent[] {
 
 export function collectText(events: AguiEvent[]): string {
   return events
-    .filter((event): event is Extract<AguiEvent, { type: 'TEXT_MESSAGE_CONTENT' }> => {
-      return event.type === 'TEXT_MESSAGE_CONTENT';
-    })
+    .filter(isTextDeltaEvent)
     .map((event) => event.delta)
     .join('');
 }
@@ -67,7 +62,22 @@ export function collectToolCalls(events: AguiEvent[]): AguiToolCall[] {
   const args = new Map<string, string>();
   const order: string[] = [];
   for (const event of events) {
-    recordToolEvent(event, names, args, order);
+    if (
+      event.type === EventType.TOOL_CALL_START &&
+      'toolCallId' in event &&
+      'toolCallName' in event
+    ) {
+      const id = String(event.toolCallId);
+      names.set(id, String(event.toolCallName));
+      if (!order.includes(id)) {
+        order.push(id);
+      }
+      continue;
+    }
+    if (event.type === EventType.TOOL_CALL_ARGS && 'toolCallId' in event && 'delta' in event) {
+      const id = String(event.toolCallId);
+      args.set(id, `${args.get(id) ?? ''}${String(event.delta)}`);
+    }
   }
   return order.map((id) => ({
     id,
@@ -76,38 +86,90 @@ export function collectToolCalls(events: AguiEvent[]): AguiToolCall[] {
   }));
 }
 
-function recordToolEvent(
-  event: AguiEvent,
-  names: Map<string, string>,
-  args: Map<string, string>,
-  order: string[],
-): void {
-  switch (event.type) {
-    case 'TOOL_CALL_START': {
-      names.set(event.toolCallId, event.toolCallName);
-      if (!order.includes(event.toolCallId)) {
-        order.push(event.toolCallId);
-      }
-      break;
+/** Map gabot turn input onto official `RunAgentInput` (message ids, empty state/context). */
+export function toRunAgentInput(input: AguiRunInput): RunAgentInput {
+  const tools: Tool[] = input.tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+  }));
+  const messages: Message[] = input.messages.map((message, index) => {
+    const id = `msg_${input.runId}_${String(index)}`;
+    if (message.role === 'system') {
+      return { id, role: 'system', content: message.content };
     }
-    case 'TOOL_CALL_ARGS': {
-      args.set(event.toolCallId, `${args.get(event.toolCallId) ?? ''}${event.delta}`);
-      break;
+    if (message.role === 'assistant') {
+      return {
+        id,
+        role: 'assistant',
+        content: message.content,
+        toolCalls: message.toolCalls?.map((call) => ({
+          id: call.id,
+          type: 'function' as const,
+          function: {
+            name: call.name,
+            arguments: JSON.stringify(call.arguments),
+          },
+        })),
+      };
     }
-    case 'TOOL_CALL_END':
-    case 'RUN_STARTED':
-    case 'RUN_FINISHED':
-    case 'RUN_ERROR':
-    case 'TEXT_MESSAGE_START':
-    case 'TEXT_MESSAGE_CONTENT':
-    case 'TEXT_MESSAGE_END': {
-      break;
+    if (message.role === 'tool') {
+      return {
+        id,
+        role: 'tool',
+        content: message.content,
+        toolCallId: message.toolCallId ?? `tool_${String(index)}`,
+      };
     }
-    default: {
-      const exhaustive: never = event;
-      return exhaustive;
-    }
-  }
+    return { id, role: 'user', content: message.content };
+  });
+  return {
+    threadId: input.threadId,
+    runId: input.runId,
+    state: {},
+    messages,
+    tools,
+    context: [],
+    forwardedProps: {},
+  };
+}
+
+/**
+ * Collect AG-UI events from an Observable-like stream (`@ag-ui/client` / `@ag-ui/mastra`).
+ * Transitional: callers may still buffer to SSE at HTTP boundaries.
+ */
+export function collectAguiObservable(source: AguiObservableLike<AguiEvent>): Promise<AguiEvent[]> {
+  return new Promise((resolve, reject) => {
+    const events: AguiEvent[] = [];
+    source.subscribe({
+      next: (event) => {
+        events.push(event);
+      },
+      error: (error: unknown) => {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+      complete: () => {
+        resolve(events);
+      },
+    });
+  });
+}
+
+type AguiObservableLike<T> = {
+  subscribe(observer: {
+    complete: () => void;
+    error: (error: unknown) => void;
+    next: (value: T) => void;
+  }): unknown;
+};
+
+function isTextDeltaEvent(event: AguiEvent): event is AguiEvent & { delta: string; type: string } {
+  return (
+    (event.type === EventType.TEXT_MESSAGE_CONTENT ||
+      event.type === EventType.TEXT_MESSAGE_CHUNK) &&
+    'delta' in event &&
+    typeof event.delta === 'string'
+  );
 }
 
 function parseArgs(raw: string): Record<string, unknown> {

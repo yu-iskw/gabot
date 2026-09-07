@@ -53,9 +53,10 @@ pnpm format
 - `packages/common`: Shared types, CEL policy, identity and model ports
 - `packages/api`: Hono control plane (gateway, audit, channels)
 - `packages/app`: React UI
-- `packages/agent`: Mastra coworker (AG-UI + A2A card)
+- `packages/agent`: Mastra coworker (AG-UI via `@ag-ui/mastra` + A2A card)
 - `packages/jobs`: Work-queue sweeps
-- `packages/scripted-model`: Deterministic OpenAI-compatible stub
+- `packages/scripted-model`: Deterministic stub consumed by Mastra's custom OpenAI-compatible endpoint config (default Compose only)
+- `packages/agent`: Mastra coworker (`@ag-ui/mastra` AG-UI bridge + A2A card; `@ai-sdk/google-vertex` for live Gemini; Mastra custom endpoint for scripted)
 - `packages/mcp-mock`: Streamable HTTP MCP server for tests
 - `e2e`: Playwright journeys against Compose
 - `docs/adr`: Architecture decisions

@@ -708,6 +708,51 @@ describe('turns and runs', () => {
     expect(events.some((row) => row.type === 'agent.delegation.completed')).toBe(true);
   });
 
+  it('runs a 20+ turn long collaboration relay across team bots', async () => {
+    const previous = {
+      depth: process.env.GABOT_MAX_DELEGATION_DEPTH,
+      child: process.env.GABOT_MAX_CHILD_RUNS,
+      root: process.env.GABOT_MAX_RUNS_PER_ROOT,
+    };
+    process.env.GABOT_MAX_DELEGATION_DEPTH = '32';
+    process.env.GABOT_MAX_CHILD_RUNS = '24';
+    process.env.GABOT_MAX_RUNS_PER_ROOT = '48';
+    try {
+      const store = new MemoryStore();
+      await store.upsertUser(person, admins);
+      const deps = scriptedDeps(store);
+      await executeTurn({
+        ...deps,
+        channelId: defaultChannel,
+        botId: 'monitor',
+        message: 'start long collaboration for 22 rounds investigating anomalies',
+        triggerType: 'interactive',
+      });
+      await drainRuns(deps);
+      const runs = await store.listRunsForChannel(defaultChannel);
+      const succeeded = runs.filter((row) => row.status === 'succeeded');
+      expect(succeeded.length).toBeGreaterThanOrEqual(20);
+      const bots = new Set(succeeded.map((row) => row.botId));
+      expect(bots.has('monitor')).toBe(true);
+      expect(bots.has('triage')).toBe(true);
+      expect(bots.has('coder')).toBe(true);
+      const events = await store.listChannelEvents(defaultChannel);
+      const turns = events.filter((row) =>
+        [
+          'tool.requested',
+          'agent.delegation.requested',
+          'run.succeeded',
+          'agent.delegation.completed',
+        ].includes(row.type),
+      );
+      expect(turns.length).toBeGreaterThanOrEqual(20);
+    } finally {
+      restoreEnv('GABOT_MAX_DELEGATION_DEPTH', previous.depth);
+      restoreEnv('GABOT_MAX_CHILD_RUNS', previous.child);
+      restoreEnv('GABOT_MAX_RUNS_PER_ROOT', previous.root);
+    }
+  });
+
   it('reclaims a queued child run after a worker restart', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, admins);
@@ -1827,7 +1872,7 @@ describe('workspace roles and revocation', () => {
 });
 
 async function drainRuns(deps: ReturnType<typeof scriptedDeps>): Promise<void> {
-  for (let step = 0; step < 8; step += 1) {
+  for (let step = 0; step < 64; step += 1) {
     const executorId = `drain-${String(step)}`;
     const items = await deps.store.claimWork(executorId, 10);
     const jobs = items.filter((item) => item.kind === RUN_EXECUTE_KIND);
@@ -1840,4 +1885,12 @@ async function drainRuns(deps: ReturnType<typeof scriptedDeps>): Promise<void> {
       await deps.store.finishWork(item.kind, item.key);
     }
   }
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
 }

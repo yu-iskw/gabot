@@ -96,6 +96,7 @@ services:
         PACKAGE: agent
     environment:
       PORT: 4200
+      GABOT_MODEL_PROVIDER: mastra-scripted
       MODEL_BASE_URL: http://scripted-model:4400/v1
       DATABASE_URL: postgres://gabot:gabot@omni:5432/gabot
       GABOT_IDENTITY_SECRET: gabot-dev-identity-secret

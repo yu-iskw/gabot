@@ -10,6 +10,7 @@
     "migrate": "node dist/migrate.js"
   },
   "dependencies": {
+    "@ag-ui/client": "0.0.59",
     "@gabot/common": "workspace:*",
     "@hono/node-server": "^1.19.0",
     "drizzle-orm": "^0.45.2",

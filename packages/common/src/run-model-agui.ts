@@ -1,35 +1,38 @@
+import { EventType } from '@ag-ui/core';
+
 import type { AguiEvent, AguiRunInput } from './ag-ui.js';
 import type { ChatMessage, ModelPort } from './ports.js';
 
+/** Scripted / in-process ModelPort → official AG-UI event sequence (tests + Compose stub). */
 export async function runModelAsAgui(model: ModelPort, input: AguiRunInput): Promise<AguiEvent[]> {
   const messageId = `msg_${input.runId}`;
   const events: AguiEvent[] = [
-    { type: 'RUN_STARTED', threadId: input.threadId, runId: input.runId },
+    { type: EventType.RUN_STARTED, threadId: input.threadId, runId: input.runId },
   ];
   const turn = await model.complete({
     messages: toChat(input),
     tools: input.tools,
   });
   if (turn.text) {
-    events.push({ type: 'TEXT_MESSAGE_START', messageId, role: 'assistant' });
-    events.push({ type: 'TEXT_MESSAGE_CONTENT', messageId, delta: turn.text });
-    events.push({ type: 'TEXT_MESSAGE_END', messageId });
+    events.push({ type: EventType.TEXT_MESSAGE_START, messageId, role: 'assistant' });
+    events.push({ type: EventType.TEXT_MESSAGE_CONTENT, messageId, delta: turn.text });
+    events.push({ type: EventType.TEXT_MESSAGE_END, messageId });
   }
   for (const call of turn.toolCalls) {
     events.push({
-      type: 'TOOL_CALL_START',
+      type: EventType.TOOL_CALL_START,
       toolCallId: call.id,
       toolCallName: call.name,
       parentMessageId: messageId,
     });
     events.push({
-      type: 'TOOL_CALL_ARGS',
+      type: EventType.TOOL_CALL_ARGS,
       toolCallId: call.id,
       delta: JSON.stringify(call.arguments),
     });
-    events.push({ type: 'TOOL_CALL_END', toolCallId: call.id });
+    events.push({ type: EventType.TOOL_CALL_END, toolCallId: call.id });
   }
-  events.push({ type: 'RUN_FINISHED', threadId: input.threadId, runId: input.runId });
+  events.push({ type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId });
   return events;
 }
 

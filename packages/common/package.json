@@ -18,6 +18,8 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@ag-ui/core": "0.0.59",
+    "@ag-ui/encoder": "0.0.59",
     "cel-js": "^0.8.2"
   },
   "devDependencies": {

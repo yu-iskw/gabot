@@ -84,12 +84,19 @@ export const UPDATE_ROUTINE_TOOL = {
 export const DELEGATE_TO_BOT_TOOL = {
   name: DELEGATE_TO_BOT,
   description:
-    'Delegate work to another bot in this channel as a durable child Run. Does not call the other bot in-process.',
+    'Delegate work to another bot in this channel as a durable child Run. botId MUST be one of: monitor, triage, coder, general-assistant. Never invent bot ids.',
   parameters: {
     type: 'object',
     properties: {
-      botId: { type: 'string', description: 'Target bot id that participates in this channel' },
-      objective: { type: 'string', description: 'What the child run should accomplish' },
+      botId: {
+        type: 'string',
+        description: 'Exact participant bot id: monitor | triage | coder | general-assistant',
+      },
+      objective: {
+        type: 'string',
+        description:
+          'What the child run should accomplish. For long collaboration relays, include "relay round N of M".',
+      },
       requestedCapabilities: {
         type: 'array',
         items: { type: 'string' },

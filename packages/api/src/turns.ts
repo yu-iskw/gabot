@@ -1,15 +1,18 @@
 import { randomUUID } from 'node:crypto';
 
+import { HttpAgent } from '@ag-ui/client';
 import {
   botIdentityContent,
+  collectAguiObservable,
   collectText,
   collectToolCalls,
+  configuredModelStepsPerRun,
   decideScriptedTurn,
   membershipCoversWorkspace,
   mentionedBotId,
-  parseAguiSse,
   rootAuthority,
   runModelAsAgui,
+  toRunAgentInput,
   TURN_TOOL_NAMES,
   TURN_TOOLS,
 } from '@gabot/common';
@@ -59,17 +62,10 @@ export function createScriptedAgentRunner(): AgentRunner {
 
 export function createHttpAgentRunner(agentUrl: string): AgentRunner {
   const root = agentUrl.replace(/\/$/, '');
+  const http = new HttpAgent({ url: `${root}/ag-ui` });
   return {
     async run(input) {
-      const response = await fetch(`${root}/ag-ui`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(input),
-      });
-      if (!response.ok) {
-        throw new Error(`Agent HTTP ${String(response.status)}`);
-      }
-      return parseAguiSse(await response.text());
+      return collectAguiObservable(http.run(toRunAgentInput(input)));
     },
   };
 }
@@ -245,7 +241,7 @@ async function completeRun(input: HeldTurn, run: RunRecord): Promise<TurnResult>
   const toolNames: string[] = [];
   let text = '';
   let current = seeded;
-  for (let step = 0; step < 4; step += 1) {
+  for (let step = 0; step < configuredModelStepsPerRun(); step += 1) {
     await assertHeld(input, run);
     const events = await input.agent.run({
       threadId,

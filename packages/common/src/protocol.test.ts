@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { EventType } from '@ag-ui/core';
+import { describe, expect, it } from 'vitest';
 
 import { createMastraAgentCard, isA2AAgentCard } from './a2a-card.js';
 import { collectText, collectToolCalls, encodeAguiSse, parseAguiSse } from './ag-ui.js';
 import { isMainModule } from './is-main.js';
 import { asRecord, asString, asStringArray } from './json-value.js';
-import { createOpenAiCompatibleModel, toOpenAiMessages } from './openai-model.js';
 import { runModelAsAgui } from './run-model-agui.js';
 import { decideScriptedTurn } from './scripted-turn.js';
 import { botIdentityContent } from './tenancy.js';
@@ -23,17 +23,17 @@ import type { ModelPort } from './ports.js';
 describe('AG-UI SSE', () => {
   it('round-trips events and collects tool calls', () => {
     const events: AguiEvent[] = [
-      { type: 'RUN_STARTED', threadId: 't', runId: 'r' },
+      { type: EventType.RUN_STARTED, threadId: 't', runId: 'r' },
       {
-        type: 'TOOL_CALL_START',
+        type: EventType.TOOL_CALL_START,
         toolCallId: 'c1',
         toolCallName: MCP_ECHO,
         parentMessageId: 'm',
       },
-      { type: 'TOOL_CALL_ARGS', toolCallId: 'c1', delta: '{"text":"hello"}' },
-      { type: 'TOOL_CALL_END', toolCallId: 'c1' },
-      { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm', delta: 'hi' },
-      { type: 'RUN_FINISHED', threadId: 't', runId: 'r' },
+      { type: EventType.TOOL_CALL_ARGS, toolCallId: 'c1', delta: '{"text":"hello"}' },
+      { type: EventType.TOOL_CALL_END, toolCallId: 'c1' },
+      { type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'm', delta: 'hi' },
+      { type: EventType.RUN_FINISHED, threadId: 't', runId: 'r' },
     ];
     const payload = events.map((event) => encodeAguiSse(event)).join('');
     const parsed = parseAguiSse(payload);
@@ -45,11 +45,24 @@ describe('AG-UI SSE', () => {
 
   it('ignores malformed argument JSON', () => {
     const events: AguiEvent[] = [
-      { type: 'TOOL_CALL_START', toolCallId: 'c1', toolCallName: 'x', parentMessageId: 'm' },
-      { type: 'TOOL_CALL_ARGS', toolCallId: 'c1', delta: 'not-json' },
-      { type: 'TOOL_CALL_END', toolCallId: 'c1' },
+      {
+        type: EventType.TOOL_CALL_START,
+        toolCallId: 'c1',
+        toolCallName: 'x',
+        parentMessageId: 'm',
+      },
+      { type: EventType.TOOL_CALL_ARGS, toolCallId: 'c1', delta: 'not-json' },
+      { type: EventType.TOOL_CALL_END, toolCallId: 'c1' },
     ];
     expect(collectToolCalls(events)[0]?.arguments).toEqual({});
+  });
+
+  it('collects TEXT_MESSAGE_CHUNK deltas from @ag-ui/mastra', () => {
+    const events: AguiEvent[] = [
+      { type: EventType.TEXT_MESSAGE_CHUNK, messageId: 'm', role: 'assistant', delta: 'Hel' },
+      { type: EventType.TEXT_MESSAGE_CHUNK, messageId: 'm', role: 'assistant', delta: 'lo' },
+    ];
+    expect(collectText(events)).toBe('Hello');
   });
 });
 
@@ -153,50 +166,36 @@ describe('decideScriptedTurn', () => {
     expect(turn.toolCalls[0]?.name).toBe(DELEGATE_TO_BOT);
     expect(turn.toolCalls[0]?.arguments.botId).toBe('triage');
   });
-});
 
-describe('createOpenAiCompatibleModel', () => {
-  it('posts chat completions and reads tool calls', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          choices: [
-            {
-              message: {
-                content: '',
-                tool_calls: [
-                  {
-                    id: 'c1',
-                    function: {
-                      name: MCP_ECHO,
-                      arguments: '{"text":"hello"}',
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        }),
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    const model = createOpenAiCompatibleModel('http://model/v1');
-    const turn = await model.complete({ messages: [{ role: 'user', content: 'go' }], tools: [] });
-    expect(turn.toolCalls[0]?.name).toBe(MCP_ECHO);
-    expect(
-      toOpenAiMessages([{ role: 'tool', content: 'x', toolCallId: 'c1', toolName: 't' }])[0],
-    ).toMatchObject({
-      role: 'tool',
-      tool_call_id: 'c1',
-    });
-    vi.unstubAllGlobals();
-  });
-
-  it('throws on a non-OK model response', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
-    const model = createOpenAiCompatibleModel('http://model/v1/');
-    await expect(model.complete({ messages: [], tools: [] })).rejects.toThrow('503');
-    vi.unstubAllGlobals();
+  it('relays long collaboration across team bots for many rounds', () => {
+    const first = decideScriptedTurn(
+      [{ role: 'user', content: 'start long collaboration for 22 rounds investigating anomalies' }],
+      'monitor',
+    );
+    expect(first.toolCalls[0]?.name).toBe(DELEGATE_TO_BOT);
+    expect(first.toolCalls[0]?.arguments.botId).toBe('triage');
+    expect(String(first.toolCalls[0]?.arguments.objective)).toContain('round 2 of 22');
+    const mid = decideScriptedTurn(
+      [
+        {
+          role: 'user',
+          content: 'Continue long collaboration relay round 21 of 22. Prior bot: coder.',
+        },
+      ],
+      'monitor',
+    );
+    expect(mid.toolCalls[0]?.arguments.botId).toBe('triage');
+    const done = decideScriptedTurn(
+      [
+        {
+          role: 'user',
+          content: 'Continue long collaboration relay round 22 of 22. Prior bot: triage.',
+        },
+      ],
+      'coder',
+    );
+    expect(done.toolCalls).toHaveLength(0);
+    expect(done.text.toLowerCase()).toContain('complete');
   });
 });
 

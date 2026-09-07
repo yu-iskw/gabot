@@ -80,6 +80,10 @@ function matchUserTurn(content: string, botId?: string): ModelTurn {
 }
 
 function teamScript(content: string, botId?: string): ModelTurn | undefined {
+  const longCollab = longCollaborationScript(content, botId);
+  if (longCollab) {
+    return longCollab;
+  }
   if (botId === 'monitor' && wantsProductionChain(content)) {
     return call(DELEGATE_TO_BOT, 'call_delegate', {
       botId: 'triage',
@@ -98,6 +102,42 @@ function teamScript(content: string, botId?: string): ModelTurn | undefined {
     return { text: 'Started coding-agent task for the triaged issues.', toolCalls: [] };
   }
   return undefined;
+}
+
+const LONG_COLLAB_RE = /long collaboration|auto-collaborat|relay round/i;
+const ROUND_RE = /round\s+(\d+)\s+of\s+(\d+)/i;
+const RELAY_BOTS = ['monitor', 'triage', 'coder'] as const;
+
+function longCollaborationScript(content: string, botId?: string): ModelTurn | undefined {
+  if (!LONG_COLLAB_RE.test(content)) {
+    return undefined;
+  }
+  const current =
+    botId && RELAY_BOTS.includes(botId as (typeof RELAY_BOTS)[number]) ? botId : 'monitor';
+  const parsed = content.match(ROUND_RE);
+  const round = parsed ? Number.parseInt(parsed[1], 10) : 1;
+  const total = parsed ? Number.parseInt(parsed[2], 10) : parseTotalRounds(content);
+  if (round >= total) {
+    return {
+      text: `Long collaboration complete after ${String(total)} rounds.`,
+      toolCalls: [],
+    };
+  }
+  const next =
+    RELAY_BOTS[
+      (RELAY_BOTS.indexOf(current as (typeof RELAY_BOTS)[number]) + 1) % RELAY_BOTS.length
+    ];
+  return call(DELEGATE_TO_BOT, `call_relay_${String(round)}`, {
+    botId: next,
+    objective: `Continue long collaboration relay round ${String(round + 1)} of ${String(total)}. Prior bot: ${current}. Keep investigating and hand off.`,
+    requestedCapabilities: [DELEGATE_TO_BOT, CREATE_BOT, COMPONENT_NOTE, MCP_ECHO],
+  });
+}
+
+function parseTotalRounds(content: string): number {
+  const match = content.match(/(\d+)\s+rounds?/i);
+  const total = match ? Number.parseInt(match[1], 10) : 22;
+  return Number.isFinite(total) && total > 0 ? total : 22;
 }
 
 function call(name: string, id: string, args: Record<string, unknown>): ModelTurn {

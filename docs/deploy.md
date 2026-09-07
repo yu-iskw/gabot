@@ -2,6 +2,16 @@
 
 This repository is testable with Docker Compose. Live GCP is not required for `pnpm test` or `pnpm test:e2e`. Use these flags when you do deploy.
 
+For **live Gemini on Vertex** locally (Mastra Agent + `@ai-sdk/google-vertex`), use the dual-track overlay:
+
+```bash
+gcloud auth application-default login
+pnpm compose:up:vertex
+GABOT_LIVE_GEMINI=1 pnpm test:e2e:live-gemini
+```
+
+That path mounts `${HOME}/.config/gcloud` into the agent container, sets `GOOGLE_VERTEX_PROJECT=ubie-yu-sandbox` and `GOOGLE_VERTEX_LOCATION=global`, and raises delegation budgets so 20+ turn bot-team relays can complete. Default `compose:up` still runs Mastra against the local scripted OpenAI-compatible stub (`MODEL_BASE_URL`); there is no custom OpenAI client in gabot.
+
 ## Resource types
 
 | Compose service       | Cloud Run resource          | Flags                                                                                                  |

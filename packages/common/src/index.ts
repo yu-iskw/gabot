@@ -129,14 +129,23 @@ export type {
 export type { AguiEvent, AguiRunInput, AguiToolCall } from './ag-ui.js';
 export {
   aguiEventsToSse,
+  collectAguiObservable,
   collectText,
   collectToolCalls,
   encodeAguiSse,
   parseAguiSse,
+  toRunAgentInput,
 } from './ag-ui.js';
 export { decideScriptedTurn } from './scripted-turn.js';
 export { nextRoutineRun } from './routine-schedule.js';
-export { createOpenAiCompatibleModel, toOpenAiMessages } from './openai-model.js';
+export {
+  configuredMaxChildRuns,
+  configuredMaxDelegationDepth,
+  configuredMaxRunsPerRoot,
+  configuredModelStepsPerRun,
+  DEFAULT_MODEL_STEPS_PER_RUN,
+  readPositiveIntEnv,
+} from './authority.js';
 export { runModelAsAgui } from './run-model-agui.js';
 export { matchesToken, offeredBearer } from './token.js';
 export type { A2AAgentCard } from './a2a-card.js';
