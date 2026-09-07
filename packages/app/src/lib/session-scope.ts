@@ -36,6 +36,11 @@ export function sessionMembershipLabel(
   return [me.workspaceId, me.role].filter(Boolean).join(' · ') || empty;
 }
 
+/** Matches API `workspaceRoleCanAdminister` (admin only). App must not import `@gabot/common`. */
+export function sessionCanManageCatalog(me: Pick<SessionMe, 'role'>): boolean {
+  return me.role === 'admin';
+}
+
 export function parseSessionMe(value: unknown): SessionMe {
   if (typeof value !== 'object' || value === null) {
     throw new Error('session me must be an object');

@@ -9,6 +9,7 @@ import { Separator } from '../components/ui/separator.js';
 import { Textarea } from '../components/ui/textarea.js';
 import { useAuth } from '../lib/auth-context.js';
 import { useSession } from '../lib/session-context.js';
+import { sessionCanManageCatalog } from '../lib/session-scope.js';
 
 type Skill = {
   id: string;
@@ -20,7 +21,8 @@ type Skill = {
 
 export function SkillsPage() {
   const { token } = useAuth();
-  const { queryKey } = useSession();
+  const { me, queryKey } = useSession();
+  const canManageCatalog = sessionCanManageCatalog(me);
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'idle' | 'new' | 'edit'>('idle');
   const [editing, setEditing] = useState<Skill | null>(null);
@@ -71,36 +73,39 @@ export function SkillsPage() {
       title="Skills"
       description="Slash-command skills this deployment offers coworkers."
       action={
-        <Button
-          data-testid="new-skill"
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            setEditing(null);
-            setMode('new');
-          }}
-        >
-          New skill
-        </Button>
+        canManageCatalog ? (
+          <Button
+            data-testid="new-skill"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setEditing(null);
+              setMode('new');
+            }}
+          >
+            New skill
+          </Button>
+        ) : undefined
       }
     >
-      {mode === 'new' || mode === 'edit' ? (
+      {(mode === 'new' && canManageCatalog) || mode === 'edit' ? (
         <SkillForm
           key={editing?.slug ?? 'new'}
           skill={editing}
           busy={save.isPending}
+          readOnly={!canManageCatalog}
           onCancel={() => {
             setMode('idle');
             setEditing(null);
           }}
           onDelete={
-            editing
+            canManageCatalog && editing
               ? () => {
                   remove.mutate(editing.slug);
                 }
               : undefined
           }
-          onSave={(input) => save.mutate(input)}
+          onSave={canManageCatalog ? (input) => save.mutate(input) : undefined}
         />
       ) : null}
       <PageSection title="Catalogue">
@@ -135,15 +140,17 @@ export function SkillsPage() {
 function SkillForm({
   skill,
   busy,
+  readOnly = false,
   onCancel,
   onDelete,
   onSave,
 }: {
   skill: Skill | null;
   busy: boolean;
+  readOnly?: boolean;
   onCancel: () => void;
   onDelete?: () => void;
-  onSave: (input: { slug: string; title: string; summary: string; instructions: string }) => void;
+  onSave?: (input: { slug: string; title: string; summary: string; instructions: string }) => void;
 }) {
   const lockedSlug = Boolean(skill);
   const [slug, setSlug] = useState(skill?.slug ?? '');
@@ -157,6 +164,9 @@ function SkillForm({
       data-testid="skill-form"
       onSubmit={(event) => {
         event.preventDefault();
+        if (readOnly || !onSave) {
+          return;
+        }
         onSave({ slug, title, summary, instructions });
       }}
     >
@@ -164,35 +174,40 @@ function SkillForm({
         name="skill-slug"
         placeholder="slug"
         value={slug}
-        disabled={lockedSlug}
+        disabled={lockedSlug || readOnly}
         onChange={(event) => setSlug(event.target.value)}
       />
       <Input
         name="skill-title"
         placeholder="Title"
         value={title}
+        disabled={readOnly}
         onChange={(event) => setTitle(event.target.value)}
       />
       <Input
         name="skill-summary"
         placeholder="Summary"
         value={summary}
+        disabled={readOnly}
         onChange={(event) => setSummary(event.target.value)}
       />
       <Textarea
         name="skill-instructions"
         placeholder="Instructions"
         value={instructions}
+        disabled={readOnly}
         onChange={(event) => setInstructions(event.target.value)}
       />
       <div className="flex flex-wrap gap-2">
-        <Button disabled={busy} type="submit">
-          Save
-        </Button>
+        {readOnly ? null : (
+          <Button disabled={busy} type="submit">
+            Save
+          </Button>
+        )}
         <Button type="button" variant="ghost" onClick={onCancel}>
-          Cancel
+          {readOnly ? 'Close' : 'Cancel'}
         </Button>
-        {onDelete ? (
+        {onDelete && !readOnly ? (
           <Button type="button" variant="ghost" data-testid="delete-skill" onClick={onDelete}>
             Delete
           </Button>

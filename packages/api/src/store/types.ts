@@ -185,6 +185,8 @@ export type ChannelEventRecord = {
 
 export type RunStatus = 'cancelled' | 'failed' | 'queued' | 'running' | 'succeeded';
 
+export type RunTriggerType = 'delegation' | 'interactive' | 'routine';
+
 export type RunRecord = {
   authority: AuthorityEnvelope;
   botId: string;
@@ -200,7 +202,23 @@ export type RunRecord = {
   rootRunId: string;
   startedAt: Date | null;
   status: RunStatus;
-  triggerType: string;
+  triggerType: RunTriggerType;
+  workspaceId: string;
+};
+
+export type CreateRunInput = {
+  authority: AuthorityEnvelope;
+  botId: string;
+  channelId: string;
+  depth: number;
+  id?: string;
+  objective: string;
+  ownerUserId: string;
+  parentRunId?: string;
+  projectId: string;
+  rootRunId?: string;
+  status: RunStatus;
+  triggerType: RunTriggerType;
   workspaceId: string;
 };
 
@@ -357,21 +375,7 @@ export type GabotStore = {
     type: string;
   }): Promise<ChannelEventRecord>;
   listChannelEvents(channelId: string): Promise<ChannelEventRecord[]>;
-  createRun(input: {
-    authority: AuthorityEnvelope;
-    botId: string;
-    channelId: string;
-    depth: number;
-    id?: string;
-    objective: string;
-    ownerUserId: string;
-    parentRunId?: string;
-    projectId: string;
-    rootRunId?: string;
-    status: RunStatus;
-    triggerType: string;
-    workspaceId: string;
-  }): Promise<RunRecord>;
+  createRun(input: CreateRunInput): Promise<RunRecord>;
   getRun(runId: string): Promise<RunRecord | null>;
   updateRunStatus(runId: string, status: RunStatus, error?: string): Promise<RunRecord | null>;
   listRunsForChannel(channelId: string): Promise<RunRecord[]>;

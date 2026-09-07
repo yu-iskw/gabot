@@ -15,7 +15,7 @@ import {
 import { runGatewayAction } from './gateway.js';
 import { PROTECTED_AGENT_ID } from './store/types.js';
 
-import type { GabotStore, RunRecord, SessionUser } from './store/types.js';
+import type { GabotStore, RunRecord, RunTriggerType, SessionUser } from './store/types.js';
 import type { AguiRunInput, AguiToolCall, ModelPort } from '@gabot/common';
 
 type AgentRunInput = AguiRunInput & { botId?: string };
@@ -65,6 +65,7 @@ type TurnInput = TurnDeps & {
   botId?: string;
   channelId: string;
   message: string;
+  triggerType: RunTriggerType;
 };
 
 type ExecuteRunInput = TurnDeps & {
@@ -136,7 +137,7 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
     channelId: input.channelId,
     botId,
     ownerUserId: input.user.id,
-    triggerType: 'interactive',
+    triggerType: input.triggerType,
     status: 'queued',
     objective: input.message,
     authority: rootAuthority(TURN_TOOL_NAMES),
@@ -159,7 +160,7 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
     type: 'run.started',
     actorType: 'bot',
     actorId: botId,
-    payload: { trigger: 'interactive' },
+    payload: { trigger: input.triggerType },
   });
   return executeRun({
     store: input.store,

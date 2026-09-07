@@ -40,6 +40,7 @@ import type {
   ChannelPolicyRecord,
   ChannelRecord,
   ChannelScope,
+  CreateRunInput,
   DelegatedChildInput,
   DelegationRecord,
   GabotStore,
@@ -1009,21 +1010,7 @@ export class PostgresStore implements GabotStore {
     }));
   }
 
-  public async createRun(input: {
-    authority: AuthorityEnvelope;
-    botId: string;
-    channelId: string;
-    depth: number;
-    id?: string;
-    objective: string;
-    ownerUserId: string;
-    parentRunId?: string;
-    projectId: string;
-    rootRunId?: string;
-    status: RunStatus;
-    triggerType: string;
-    workspaceId: string;
-  }): Promise<RunRecord> {
+  public async createRun(input: CreateRunInput): Promise<RunRecord> {
     const id = input.id ?? crypto.randomUUID();
     const rootRunId = input.rootRunId ?? id;
     const startedAt = input.status === 'running' ? new Date() : null;
