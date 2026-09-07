@@ -6,7 +6,8 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "demo:durable-task": "node dist/demo-server.js"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.59",

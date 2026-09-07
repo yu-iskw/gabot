@@ -1,0 +1,4 @@
+# Residual OSV findings that cannot be patched without breaking transitive majors.
+[[IgnoredVulns]]
+id = "GHSA-866g-f22w-33x8"
+reason = "Low severity; no vendor patch in 2.x/3.x. @mastra/core needs distinct provider-utils majors via npm aliases; forcing 4.x removes validatorSymbol and breaks the agent."

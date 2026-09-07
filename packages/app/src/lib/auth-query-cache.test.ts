@@ -22,6 +22,17 @@ describe('syncAuthQueryCache', () => {
     expect(queryClient.getQueryData(['channels'])).toBeUndefined();
   });
 
+  it('keeps the public workspace directory when auth identity changes', () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(['workspace-directory'], { workspaces: [{ slug: 'gabot' }] });
+    queryClient.setQueryData(['connections'], { credentialRef: 'admin-secret' });
+    syncAuthQueryCache(queryClient, { generation: 1, uid: null }, { generation: 1, uid: 'admin' });
+    expect(queryClient.getQueryData(['workspace-directory'])).toEqual({
+      workspaces: [{ slug: 'gabot' }],
+    });
+    expect(queryClient.getQueryData(['connections'])).toBeUndefined();
+  });
+
   it('keeps cached queries when uid and generation are unchanged', () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(['connections'], { credentialRef: 'same-user' });

@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,7 +23,7 @@ app.get('/workspace-directory.json', (context) =>
   context.json(toPublicWorkspaceListing(directory)),
 );
 
-app.all('/api/*', async (context) => {
+async function proxyUpstream(context: Context): Promise<Response> {
   const method = context.req.method;
   const body = method === 'GET' || method === 'HEAD' ? undefined : await context.req.arrayBuffer();
   const response = await proxyApiRequest({
@@ -36,7 +36,11 @@ app.all('/api/*', async (context) => {
     body,
   });
   return new Response(response.body, { status: response.status, headers: response.headers });
-});
+}
+
+// Channel/admin surfaces use /api/*; durable tasks use /v1/*.
+app.all('/api/*', proxyUpstream);
+app.all('/v1/*', proxyUpstream);
 
 app.use('/*', serveStatic({ root: './dist' }));
 app.get('*', serveStatic({ path: './dist/index.html' }));

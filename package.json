@@ -33,6 +33,7 @@
     "compose:up:dual:vertex": "docker compose -f compose/docker-compose.yml -f compose/vertex.yml --profile dual up -d --wait --build",
     "compose:up:vertex": "docker compose -f compose/docker-compose.yml -f compose/vertex.yml up -d --wait",
     "compose:down": "docker compose -f compose/docker-compose.yml --profile dual down --remove-orphans",
+    "demo:durable-task:api": "pnpm --filter @gabot/api build && pnpm --filter @gabot/api demo:durable-task",
     "test:e2e:live-gemini": "pnpm --filter @gabot/e2e test:live-gemini"
   },
   "devDependencies": {

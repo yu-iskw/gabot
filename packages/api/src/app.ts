@@ -28,6 +28,7 @@ import {
   type SessionUser,
   type WorkspaceRecord,
 } from './store/types.js';
+import { admitTaskRequest, mapTaskHttpError } from './tasks.js';
 import {
   executeRun,
   executeTurn,
@@ -86,8 +87,12 @@ export function createApiApp(rawOptions: ApiOptions): Hono<{ Variables: AuthVari
   app.use(`${API_ROUTINES}/*`, auth);
   app.use(API_SKILLS, auth);
   app.use(`${API_SKILLS}/*`, auth);
+  app.use('/v1/tasks', auth);
+  app.use('/v1/tasks/*', auth);
+  app.use('/v1/runs/*', auth);
 
   registerSessionRoutes(app, options);
+  registerTaskRoutes(app, options);
   registerProductRoutes(app, options);
   registerInternalRoutes(app, options);
   return app;
@@ -333,6 +338,127 @@ function registerChannelMutationRoutes(
     }
     const saved = await options.store.replaceChannelPolicies(owned.channel.id, policies);
     return context.json({ policies: saved });
+  });
+}
+
+function registerTaskRoutes(app: Hono<{ Variables: AuthVariables }>, options: ApiOptions): void {
+  app.post('/v1/tasks', async (context) => {
+    const user = context.get('user');
+    try {
+      const admitted = await admitTaskRequest(
+        { store: options.store, user },
+        await context.req.json(),
+      );
+      return context.json(
+        {
+          taskId: admitted.task.id,
+          runId: admitted.run.id,
+          status: admitted.task.status,
+          created: admitted.created,
+        },
+        admitted.created ? 202 : 200,
+      );
+    } catch (error) {
+      const mapped = mapTaskHttpError(error);
+      return context.json({ error: mapped.message }, mapped.status);
+    }
+  });
+  app.get('/v1/tasks', async (context) => {
+    const access = await requireWorkspace(options.store, context.get('user'));
+    if (!access.ok) {
+      return context.json(access.body, access.status);
+    }
+    const limit = Number(context.req.query('limit') ?? '50');
+    const tasks = await options.store.listTasks(
+      access.workspace.id,
+      Number.isFinite(limit) ? limit : 50,
+    );
+    return context.json({
+      tasks: tasks.map((task) => ({
+        id: task.id,
+        objective: task.objective,
+        status: task.status,
+        botId: task.botId,
+        channelId: task.channelId,
+        currentRunId: task.currentRunId,
+        updatedAt: task.updatedAt.toISOString(),
+      })),
+    });
+  });
+  app.get('/v1/tasks/:id', async (context) => {
+    const user = context.get('user');
+    const snapshot = await options.store.getTaskSnapshot(context.req.param('id'));
+    if (!snapshot) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    const membership = await options.store.getMembership(user.id);
+    if (!membershipCoversWorkspace(membership, snapshot.task.workspaceId)) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    return context.json({
+      task: {
+        id: snapshot.task.id,
+        objective: snapshot.task.objective,
+        successCriteria: snapshot.task.successCriteria,
+        audience: snapshot.task.audience,
+        status: snapshot.task.status,
+        botId: snapshot.task.botId,
+        channelId: snapshot.task.channelId,
+        workspaceId: snapshot.task.workspaceId,
+        currentRunId: snapshot.task.currentRunId,
+        updatedAt: snapshot.task.updatedAt.toISOString(),
+      },
+      artifact: snapshot.artifact
+        ? {
+            id: snapshot.artifact.id,
+            version: snapshot.artifact.version,
+            kind: snapshot.artifact.kind,
+            content: snapshot.artifact.content,
+            contentRef: snapshot.artifact.contentRef,
+            audience: snapshot.artifact.audience,
+            validationStatus: snapshot.artifact.validationStatus,
+          }
+        : null,
+    });
+  });
+  app.get('/v1/runs/:id/events', async (context) => {
+    const user = context.get('user');
+    const run = await options.store.getRun(context.req.param('id'));
+    if (!run) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    const membership = await options.store.getMembership(user.id);
+    if (!membershipCoversWorkspace(membership, run.workspaceId)) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    const after = Number(context.req.query('after') ?? '0');
+    const events = await options.store.listRunEvents(run.id, Number.isFinite(after) ? after : 0);
+    return context.json({
+      events: events.map((event) => ({
+        runId: event.runId,
+        sequence: event.sequence,
+        type: event.type,
+        schemaVersion: event.schemaVersion,
+        payload: event.payload,
+        createdAt: event.createdAt.toISOString(),
+      })),
+    });
+  });
+  app.post('/v1/runs/:id/cancel', async (context) => {
+    const user = context.get('user');
+    const run = await options.store.getRun(context.req.param('id'));
+    if (!run || !run.taskId) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    const membership = await options.store.getMembership(user.id);
+    if (!membershipCoversWorkspace(membership, run.workspaceId)) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    const task = await options.store.cancelTask(run.taskId, run.id);
+    if (!task) {
+      return context.json({ error: NOT_FOUND }, 404);
+    }
+    return context.json({ taskId: task.id, status: task.status, runId: run.id });
   });
 }
 

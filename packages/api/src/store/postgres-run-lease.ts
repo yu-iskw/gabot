@@ -64,7 +64,7 @@ async function writeAdmittedRootRun(sql: TxSql, input: RootRunAdmission): Promis
     RETURNING
       id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
       owner_user_id, trigger_type, status, objective, authority, depth, started_at,
-      finished_at, error
+      finished_at, error, task_id
   `;
   const row = rows.at(0);
   if (row === undefined) {
@@ -183,7 +183,7 @@ async function lockRunRow(sql: TxSql, runId: string): Promise<DbRun | undefined>
   const rows = await sql<DbRun[]>`
     SELECT id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
            owner_user_id, trigger_type, status, objective, authority, depth, started_at,
-           finished_at, error
+           finished_at, error, task_id
     FROM runs WHERE id = ${runId} FOR UPDATE
   `;
   return rows.at(0);
@@ -223,7 +223,7 @@ async function startQueuedRun(
     RETURNING
       id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
       owner_user_id, trigger_type, status, objective, authority, depth, started_at,
-      finished_at, error
+      finished_at, error, task_id
   `;
   const updatedRow = updatedRows.at(0);
   if (updatedRow === undefined) {
@@ -244,7 +244,7 @@ async function reapRunningRun(sql: TxSql, run: RunRecord, now: Date): Promise<Ru
     RETURNING
       id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
       owner_user_id, trigger_type, status, objective, authority, depth, started_at,
-      finished_at, error
+      finished_at, error, task_id
   `;
   const reapedRow = reapedRows.at(0);
   if (reapedRow === undefined) {
@@ -311,7 +311,7 @@ async function performSettleRun(sql: TxSql, input: SettleRunInput): Promise<RunR
     RETURNING
       id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
       owner_user_id, trigger_type, status, objective, authority, depth, started_at,
-      finished_at, error
+      finished_at, error, task_id
   `;
   const updatedRow = updatedRows.at(0);
   if (updatedRow === undefined) {

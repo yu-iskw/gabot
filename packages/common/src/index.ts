@@ -261,3 +261,20 @@ export {
   parseBootstrapDiscovery,
   parseScopedFeedEvent,
 } from './protocol-contracts.js';
+export type {
+  ArtifactSnapshot,
+  SequencedRunEvent,
+  TaskAdmitAccepted,
+  TaskAdmitRequest,
+  TaskSnapshot,
+  TaskStatus,
+} from './task-contracts.js';
+export {
+  buildDiagnosisArtifactContent,
+  DEFAULT_DIAGNOSIS_CRITERIA,
+  diagnosisArtifactMeetsCriteria,
+  digestTaskAdmitRequest,
+  parseTaskAdmitRequest,
+  parseTaskStatus,
+  TASK_STATUSES,
+} from './task-contracts.js';

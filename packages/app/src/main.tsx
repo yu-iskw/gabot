@@ -44,6 +44,7 @@ import { NewChannelPage } from './pages/new-channel-page.js';
 import { RoutinesPage } from './pages/routines-page.js';
 import { SettingsPage } from './pages/settings-page.js';
 import { SkillsPage } from './pages/skills-page.js';
+import { TaskPage } from './pages/task-page.js';
 import './styles.css';
 
 const queryClient = new QueryClient();
@@ -171,6 +172,11 @@ function LegacyChannelRedirect() {
   );
 }
 
+function TaskScreen() {
+  const params: unknown = workspaceTaskRoute.useParams();
+  return <TaskPage taskId={readRouteString(params, 'taskId', '')} />;
+}
+
 const rootRoute = createRootRoute({ component: RootScreen });
 const signRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -212,6 +218,11 @@ const workspaceChannelRoute = createRoute({
   path: '/channels/$channelPublicId',
   validateSearch: (search: Record<string, unknown>) => readChannelSearch(search),
   component: ChannelScreen,
+});
+const workspaceTaskRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: '/tasks/$taskId',
+  component: TaskScreen,
 });
 const agentsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -288,6 +299,7 @@ const routeTree = rootRoute.addChildren([
       workspaceIndexRoute,
       newChannelRoute,
       workspaceChannelRoute,
+      workspaceTaskRoute,
       agentsRoute,
       routinesRoute,
       skillsRoute,

@@ -18,6 +18,7 @@ export type DbRun = {
   root_run_id: string;
   started_at: Date | null;
   status: string;
+  task_id: string | null;
   trigger_type: string;
   workspace_id: string;
 };
@@ -76,5 +77,6 @@ export function toRunRecord(row: DbRun): RunRecord {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     error: row.error,
+    taskId: row.task_id,
   };
 }

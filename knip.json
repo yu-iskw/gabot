@@ -16,7 +16,7 @@
       ]
     },
     "packages/*": {
-      "entry": ["src/index.ts", "src/main.tsx", "server/serve.ts"],
+      "entry": ["src/index.ts", "src/demo-server.ts", "src/main.tsx", "server/serve.ts"],
       "project": ["src/**/*.{ts,tsx}", "server/**/*.ts"]
     }
   }

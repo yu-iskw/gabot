@@ -10,4 +10,6 @@ excluded_rules = [
   "require-lock-timeout",
   "require-statement-timeout",
   "prefer-bigint-over-int",
+  # Applied once under Atlas on empty/dev DBs; SET NOT NULL after backfill is intentional.
+  "adding-not-nullable-field",
 ]

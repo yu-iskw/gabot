@@ -7,6 +7,10 @@ import { describe, expect, it } from 'vitest';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bootstrap = readFileSync(join(root, 'db/migrations/20260907120000_bootstrap.sql'), 'utf8');
+const tasksMigration = readFileSync(
+  join(root, 'db/migrations/20260907190000_tasks_artifacts_run_events.sql'),
+  'utf8',
+);
 const seed = readFileSync(join(root, 'db/seed/dev.sql'), 'utf8');
 const atlasSum = readFileSync(join(root, 'db/migrations/atlas.sum'), 'utf8');
 
@@ -39,5 +43,15 @@ describe('atlas bootstrap migration', () => {
     expect(seed).toContain('INSERT INTO connections');
     expect(bootstrap).not.toContain('INSERT INTO agents');
     expect(atlasSum).toContain('20260907120000_bootstrap.sql');
+  });
+
+  it('adds task redesign tables for Stage 1–2 MVP', () => {
+    expect(tasksMigration).toContain('CREATE TABLE tasks');
+    expect(tasksMigration).toContain('CREATE TABLE artifacts');
+    expect(tasksMigration).toContain('CREATE TABLE run_events');
+    expect(tasksMigration).toContain('CREATE TABLE outbox');
+    expect(tasksMigration).toContain('ALTER TABLE runs ADD COLUMN task_id');
+    expect(tasksMigration).toContain('VALIDATE CONSTRAINT runs_task_id_fkey');
+    expect(atlasSum).toContain('20260907190000_tasks_artifacts_run_events.sql');
   });
 });

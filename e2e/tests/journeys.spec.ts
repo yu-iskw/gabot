@@ -197,6 +197,50 @@ test('grants MCP echo from Plugins so a bot can call it', async ({ page, request
   }
 });
 
+test('admits a durable task and reconnects to a diagnosis artifact', async ({ request }) => {
+  const token = await emulatorIdToken();
+  const channelResponse = await request.post(`${API}/api/channels`, {
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    data: { name: `task-${Date.now()}` },
+  });
+  expect(channelResponse.ok()).toBeTruthy();
+  const channelBody = (await channelResponse.json()) as { channel: { id: string } };
+  const admit = await request.post(`${API}/v1/tasks`, {
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    data: {
+      objective: 'Investigate CI failure on lint',
+      channelId: channelBody.channel.id,
+      idempotencyKey: `e2e-task-${Date.now()}`,
+    },
+  });
+  expect(admit.status()).toBe(202);
+  const admitted = (await admit.json()) as { runId: string; taskId: string };
+  await expect
+    .poll(
+      async () => {
+        const snapshot = await request.get(`${API}/v1/tasks/${admitted.taskId}`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        const body = (await snapshot.json()) as {
+          artifact: { content: string } | null;
+          task: { status: string };
+        };
+        return body.task.status === 'completed' &&
+          Boolean(body.artifact?.content.includes('Observations'))
+          ? 'ready'
+          : body.task.status;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe('ready');
+  const events = await request.get(`${API}/v1/runs/${admitted.runId}/events?after=0`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const eventBody = (await events.json()) as { events: { type: string }[] };
+  expect(eventBody.events.some((event) => event.type === 'task.admitted')).toBeTruthy();
+  expect(eventBody.events.some((event) => event.type === 'artifact.persisted')).toBeTruthy();
+});
+
 test('delegates monitor to triage to coder without human relay', async ({ page }) => {
   await signInAndOpenGeneral(page);
   await page

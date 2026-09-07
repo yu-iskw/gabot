@@ -35,6 +35,17 @@ import {
 } from './postgres-run-lease.js';
 import { parseEnvelope, toRunRecord, type DbRun } from './postgres-run-map.js';
 import {
+  cancelTaskTx,
+  completeTaskAttemptTx,
+  insertAdmittedTask,
+  insertRunEvent,
+  selectRunEvents,
+  selectTask,
+  selectTasks,
+  selectTaskSnapshot,
+  updateTaskWorking,
+} from './postgres-task.js';
+import {
   PROTECTED_AGENT_ID,
   PROJECT_NOT_FOUND,
   WORK_LEASE_MS,
@@ -44,6 +55,7 @@ import {
 import type {
   AcquireRunInput,
   AdmittedRun,
+  AdmittedTask,
   AgentPatch,
   AgentProfile,
   AuditListScope,
@@ -74,9 +86,13 @@ import type {
   RunLease,
   RunRecord,
   RunStatus,
+  SequencedRunEventRecord,
   SessionUser,
   SettleRunInput,
   SkillRecord,
+  TaskAdmissionInput,
+  TaskRecord,
+  TaskSnapshotRecord,
   WorkRecord,
   WorkspaceRecord,
 } from './types.js';
@@ -1092,7 +1108,7 @@ export class PostgresStore implements GabotStore {
       RETURNING
         id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
         owner_user_id, trigger_type, status, objective, authority, depth, started_at,
-        finished_at, error
+        finished_at, error, task_id
     `;
     const row = rows.at(0);
     if (row === undefined) {
@@ -1105,7 +1121,7 @@ export class PostgresStore implements GabotStore {
     const rows = await this.sql<DbRun[]>`
       SELECT id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
              owner_user_id, trigger_type, status, objective, authority, depth, started_at,
-             finished_at, error
+             finished_at, error, task_id
       FROM runs WHERE id = ${runId}
     `;
     const row = rows.at(0);
@@ -1133,7 +1149,7 @@ export class PostgresStore implements GabotStore {
       RETURNING
         id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
         owner_user_id, trigger_type, status, objective, authority, depth, started_at,
-        finished_at, error
+        finished_at, error, task_id
     `;
     const row = rows.at(0);
     return row ? toRunRecord(row) : null;
@@ -1143,7 +1159,7 @@ export class PostgresStore implements GabotStore {
     const rows = await this.sql<DbRun[]>`
       SELECT id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
              owner_user_id, trigger_type, status, objective, authority, depth, started_at,
-             finished_at, error
+             finished_at, error, task_id
       FROM runs WHERE channel_id = ${channelId} ORDER BY created_at
     `;
     return rows.map(toRunRecord);
@@ -1196,6 +1212,52 @@ export class PostgresStore implements GabotStore {
 
   public async settleRun(input: SettleRunInput): Promise<RunRecord | null> {
     return settleRunTx(this.sql, input);
+  }
+
+  public async admitTask(input: TaskAdmissionInput): Promise<AdmittedTask> {
+    return insertAdmittedTask(this.sql, input);
+  }
+
+  public async getTask(taskId: string): Promise<TaskRecord | null> {
+    return selectTask(this.sql, taskId);
+  }
+
+  public async getTaskSnapshot(taskId: string): Promise<TaskSnapshotRecord | null> {
+    return selectTaskSnapshot(this.sql, taskId);
+  }
+
+  public async listTasks(workspaceId: string, limit = 50): Promise<TaskRecord[]> {
+    return selectTasks(this.sql, workspaceId, limit);
+  }
+
+  public async listRunEvents(runId: string, afterSequence = 0): Promise<SequencedRunEventRecord[]> {
+    return selectRunEvents(this.sql, runId, afterSequence);
+  }
+
+  public async appendRunEvent(input: {
+    payload?: Record<string, unknown>;
+    runId: string;
+    type: string;
+  }): Promise<SequencedRunEventRecord> {
+    return insertRunEvent(this.sql, input);
+  }
+
+  public async markTaskWorking(taskId: string, runId: string): Promise<TaskRecord | null> {
+    return updateTaskWorking(this.sql, taskId, runId);
+  }
+
+  public async completeTaskAttempt(input: {
+    artifactContent: string;
+    artifactKind?: string;
+    contractMet: boolean;
+    runId: string;
+    taskId: string;
+  }): Promise<TaskSnapshotRecord | null> {
+    return completeTaskAttemptTx(this.sql, input);
+  }
+
+  public async cancelTask(taskId: string, runId: string): Promise<TaskRecord | null> {
+    return cancelTaskTx(this.sql, taskId, runId);
   }
 
   private async maybeBootstrapAdmin(
