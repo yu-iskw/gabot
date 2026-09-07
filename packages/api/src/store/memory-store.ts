@@ -27,10 +27,15 @@ import {
   DelegationBudgetError,
   PROJECT_NOT_FOUND,
   PROTECTED_AGENT_ID,
+  RUN_EXECUTE_KIND,
+  RUN_LEASE_LOST,
+  WORK_LEASE_MS,
   WORKSPACE_NOT_FOUND,
 } from './types.js';
 
 import type {
+  AcquireRunInput,
+  AdmittedRun,
   AgentPatch,
   AgentProfile,
   AuditListScope,
@@ -52,12 +57,17 @@ import type {
   PluginRecord,
   PluginTool,
   ProjectRecord,
+  RenewRunLeaseInput,
+  RootRunAdmission,
   RoutineListItem,
   RoutinePatch,
   RoutineRecord,
+  RunAcquisition,
+  RunLease,
   RunRecord,
   RunStatus,
   SessionUser,
+  SettleRunInput,
   SkillRecord,
   WorkRecord,
   WorkspaceRecord,
@@ -431,7 +441,7 @@ export class MemoryStore implements GabotStore {
         continue;
       }
       row.claimedBy = workerId;
-      row.leaseUntil = new Date(now.getTime() + 5 * 60_000);
+      row.leaseUntil = leaseUntilOf(now);
       row.attempts += 1;
       claimed.push({ kind: row.kind, key: row.key, payload: row.payload, attempts: row.attempts });
     }
@@ -743,7 +753,7 @@ export class MemoryStore implements GabotStore {
       authorityEnvelope: input.authority,
     });
     await this.enqueueWork({
-      kind: 'run.execute',
+      kind: RUN_EXECUTE_KIND,
       key: child.id,
       payload: { runId: child.id },
     });
@@ -766,6 +776,122 @@ export class MemoryStore implements GabotStore {
         requestedCapabilities: [...row.requestedCapabilities],
         authorityEnvelope: cloneAuthority(row.authorityEnvelope),
       }));
+  }
+
+  public async admitRootRun(input: RootRunAdmission): Promise<AdmittedRun> {
+    const now = input.now ?? new Date();
+    const id = randomUUID();
+    const run: RunRecord = {
+      id,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      channelId: input.channelId,
+      parentRunId: null,
+      rootRunId: id,
+      botId: input.botId,
+      ownerUserId: input.ownerUserId,
+      triggerType: input.triggerType,
+      status: 'queued',
+      objective: input.message,
+      authority: cloneAuthority(input.authority),
+      depth: 0,
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+    };
+    this.runs.set(id, run);
+
+    this.messages.push({
+      id: randomUUID(),
+      channelId: input.channelId,
+      role: 'user',
+      content: input.message,
+      agentId: null,
+      createdAt: now,
+    });
+    const channel = this.channels.get(input.channelId);
+    if (channel) {
+      channel.lastMessage = input.message;
+    }
+
+    this.events.push({
+      id: randomUUID(),
+      channelId: input.channelId,
+      runId: id,
+      type: 'message.user',
+      actorType: 'user',
+      actorId: input.ownerUserId,
+      payload: { message: input.message },
+      createdAt: now,
+    });
+    this.events.push({
+      id: randomUUID(),
+      channelId: input.channelId,
+      runId: id,
+      type: 'run.started',
+      actorType: 'bot',
+      actorId: input.botId,
+      payload: { trigger: input.triggerType },
+      createdAt: now,
+    });
+
+    const leaseUntil = this.claimExecuteWork(id, input.executorId, now);
+    return { run: cloneRun(run), lease: { executorId: input.executorId, leaseUntil } };
+  }
+
+  public async acquireRun(input: AcquireRunInput): Promise<RunAcquisition> {
+    const now = input.now ?? new Date();
+    const run = this.runs.get(input.runId);
+    if (!run) {
+      return { outcome: 'missing' };
+    }
+    if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled') {
+      return { outcome: 'terminal', run: cloneRun(run) };
+    }
+    const work = this.executeWork(input.runId);
+    if (heldByOther(work, input.executorId, now)) {
+      return { outcome: 'busy', run: cloneRun(run) };
+    }
+    if (run.status === 'queued') {
+      return this.startQueuedRun(run, work, input.executorId, now);
+    }
+    return this.reapRunningRun(run, work, now);
+  }
+
+  public async renewRunLease(input: RenewRunLeaseInput): Promise<RunLease | null> {
+    const now = input.now ?? new Date();
+    const run = this.runs.get(input.runId);
+    if (!run || run.status !== 'running') {
+      return null;
+    }
+    const work = this.executeWork(input.runId);
+    if (!work || work.claimedBy !== input.executorId || work.finishedAt !== null) {
+      return null;
+    }
+    const leaseUntil = leaseUntilOf(now);
+    work.leaseUntil = leaseUntil;
+    return { executorId: input.executorId, leaseUntil };
+  }
+
+  public async settleRun(input: SettleRunInput): Promise<RunRecord | null> {
+    const now = input.now ?? new Date();
+    const run = this.runs.get(input.runId);
+    if (!run || run.status !== 'running') {
+      return null;
+    }
+    const work = this.executeWork(input.runId);
+    if (work && (work.claimedBy !== input.executorId || work.finishedAt !== null)) {
+      return null;
+    }
+    this.appendSettledAssistant(run, input, now);
+    run.status = input.status;
+    run.error = input.error ?? null;
+    run.finishedAt = now;
+    if (work) {
+      work.finishedAt = now;
+      work.lastError = input.error ?? null;
+    }
+    return cloneRun(run);
   }
 
   public async listSkills(): Promise<SkillRecord[]> {
@@ -902,6 +1028,87 @@ export class MemoryStore implements GabotStore {
 
   public addRoutine(routine: RoutineRow): void {
     this.routines.push(routine);
+  }
+
+  private appendSettledAssistant(run: RunRecord, input: SettleRunInput, now: Date): void {
+    if (input.status !== 'succeeded' || !input.assistantContent) {
+      return;
+    }
+    this.messages.push({
+      id: randomUUID(),
+      channelId: run.channelId,
+      role: 'assistant',
+      content: input.assistantContent,
+      agentId: run.botId,
+      createdAt: now,
+    });
+    const channel = this.channels.get(run.channelId);
+    if (channel) {
+      channel.lastMessage = input.assistantContent;
+    }
+  }
+
+  private executeWork(runId: string): WorkRow | undefined {
+    return this.work.find((row) => row.kind === RUN_EXECUTE_KIND && row.key === runId);
+  }
+
+  private claimExecuteWork(runId: string, executorId: string, now: Date): Date {
+    const leaseUntil = leaseUntilOf(now);
+    this.work.push({
+      kind: RUN_EXECUTE_KIND,
+      key: runId,
+      payload: { runId },
+      runAt: now,
+      claimedBy: executorId,
+      leaseUntil,
+      attempts: 1,
+      finishedAt: null,
+      lastError: null,
+    });
+    return leaseUntil;
+  }
+
+  private startQueuedRun(
+    run: RunRecord,
+    work: WorkRow | undefined,
+    executorId: string,
+    now: Date,
+  ): RunAcquisition {
+    let leaseUntil = leaseUntilOf(now);
+    if (!work) {
+      leaseUntil = this.claimExecuteWork(run.id, executorId, now);
+    } else {
+      work.attempts += work.claimedBy === executorId ? 0 : 1;
+      work.claimedBy = executorId;
+      work.leaseUntil = leaseUntil;
+      work.finishedAt = null;
+    }
+    run.status = 'running';
+    if (!run.startedAt) {
+      run.startedAt = now;
+    }
+    return { outcome: 'started', run: cloneRun(run), lease: { executorId, leaseUntil } };
+  }
+
+  private reapRunningRun(run: RunRecord, work: WorkRow | undefined, now: Date): RunAcquisition {
+    run.status = 'failed';
+    run.error = RUN_LEASE_LOST;
+    run.finishedAt = now;
+    if (work) {
+      work.finishedAt = now;
+      work.lastError = RUN_LEASE_LOST;
+    }
+    this.events.push({
+      id: randomUUID(),
+      channelId: run.channelId,
+      runId: run.id,
+      type: run.parentRunId ? 'agent.delegation.failed' : 'run.failed',
+      actorType: 'bot',
+      actorId: run.botId,
+      payload: { error: RUN_LEASE_LOST },
+      createdAt: now,
+    });
+    return { outcome: 'lost', run: cloneRun(run) };
   }
 
   private countDelegationBudget(parent: RunRecord): {
@@ -1047,6 +1254,10 @@ export class MemoryStore implements GabotStore {
   }
 }
 
+function leaseUntilOf(now: Date): Date {
+  return new Date(now.getTime() + WORK_LEASE_MS);
+}
+
 function isClaimable(row: WorkRow, now: Date): boolean {
   if (row.finishedAt) {
     return false;
@@ -1058,6 +1269,20 @@ function isClaimable(row: WorkRow, now: Date): boolean {
     return true;
   }
   return row.leaseUntil !== null && row.leaseUntil < now;
+}
+
+function isLiveLease(row: WorkRow | undefined, now: Date): boolean {
+  return (
+    row !== undefined &&
+    row.finishedAt === null &&
+    row.claimedBy !== null &&
+    row.leaseUntil !== null &&
+    row.leaseUntil > now
+  );
+}
+
+function heldByOther(row: WorkRow | undefined, executorId: string, now: Date): boolean {
+  return isLiveLease(row, now) && row?.claimedBy !== executorId;
 }
 
 function toChannelRecord(channel: ChannelRow): ChannelRecord {

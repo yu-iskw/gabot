@@ -248,6 +248,66 @@ export class DelegationBudgetError extends Error {
   }
 }
 
+export const RUN_EXECUTE_KIND = 'run.execute';
+export const WORK_LEASE_MS = 5 * 60_000;
+export const RUN_LEASE_LOST = 'Executor lease lost while running.';
+
+/** Lock token on `work_items(run.execute, key = run.id)`, not an identity. */
+export type RunLease = {
+  executorId: string;
+  leaseUntil: Date;
+};
+
+export type RootRunAdmission = {
+  authority: AuthorityEnvelope;
+  botId: string;
+  channelId: string;
+  executorId: string;
+  message: string;
+  now?: Date;
+  ownerUserId: string;
+  projectId: string;
+  triggerType: Exclude<RunTriggerType, 'delegation'>;
+  workspaceId: string;
+};
+
+export type AdmittedRun = {
+  lease: RunLease;
+  run: RunRecord;
+};
+
+/**
+ * `lost` means the store already wrote status failed (RUN_LEASE_LOST) and the failure
+ * event; the caller must not execute.
+ */
+export type RunAcquisition =
+  | { lease: RunLease; outcome: 'started'; run: RunRecord }
+  | { outcome: 'lost'; run: RunRecord }
+  | { outcome: 'busy'; run: RunRecord }
+  | { outcome: 'terminal'; run: RunRecord }
+  | { outcome: 'missing' };
+
+export type AcquireRunInput = {
+  executorId: string;
+  now?: Date;
+  runId: string;
+};
+
+export type RenewRunLeaseInput = {
+  executorId: string;
+  now?: Date;
+  runId: string;
+};
+
+export type SettleRunInput = {
+  assistantContent?: string;
+  error?: string;
+  executorId: string;
+  now?: Date;
+  runId: string;
+  status: Extract<RunStatus, 'failed' | 'succeeded'>;
+};
+
 export const PROJECT_NOT_FOUND = 'Project not found.';
 export const WORKSPACE_NOT_FOUND = 'Workspace not found.';
 
@@ -381,6 +441,19 @@ export type GabotStore = {
   listRunsForChannel(channelId: string): Promise<RunRecord[]>;
   createDelegatedChild(input: DelegatedChildInput): Promise<RunRecord>;
   listDelegationsForParent(parentRunId: string): Promise<DelegationRecord[]>;
+  /** Root counterpart of createDelegatedChild. Never leaves a queued root without a lapsing lease. */
+  admitRootRun(input: RootRunAdmission): Promise<AdmittedRun>;
+  /**
+   * Lock order is always runs then work_items. The only way a run goes queued → running.
+   * Reaps stale running runs to failed; never re-enters execution for them.
+   */
+  acquireRun(input: AcquireRunInput): Promise<RunAcquisition>;
+  /** Heartbeat at effect boundaries. null means this executor no longer owns the run. */
+  renewRunLease(input: RenewRunLeaseInput): Promise<RunLease | null>;
+  /**
+   * The only way a run leaves 'running'. Null means fenced out; callers must not report success.
+   */
+  settleRun(input: SettleRunInput): Promise<RunRecord | null>;
 };
 
 export const PROTECTED_AGENT_ID = GENERAL_ASSISTANT_ID;

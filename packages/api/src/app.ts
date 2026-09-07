@@ -23,15 +23,23 @@ import {
   WORKSPACE_NOT_FOUND,
   type ChannelRecord,
   type GabotStore,
+  type RunRecord,
   type SessionMeResponse,
   type SessionUser,
   type WorkspaceRecord,
 } from './store/types.js';
-import { executeRun, executeTurn, isTurnClientError } from './turns.js';
+import {
+  executeRun,
+  executeTurn,
+  isRunFenced,
+  isTurnClientError,
+  processExecutorId,
+} from './turns.js';
 
 import type { AuthVariables } from './auth.js';
 import type { AgentRunner } from './turns.js';
 import type { ActionPolicy, IdentityKey, PeopleAuthPort, WorkspaceRole } from '@gabot/common';
+import type { Context } from 'hono';
 
 type ApiOptions = {
   store: GabotStore;
@@ -40,6 +48,7 @@ type ApiOptions = {
   mcpUrl: string;
   workerSecret: string;
   adminIdentities: IdentityKey[];
+  executorId?: string;
 };
 
 const BOT = PROTECTED_AGENT_ID;
@@ -57,7 +66,9 @@ const DEFAULT_CHANNEL_LOCKED = 'Cannot archive the default channel';
 const LAST_ADMIN_REQUIRED = 'Cannot remove the last admin';
 const WORKER_SECRET_HEADER = 'x-gabot-worker-secret';
 
-export function createApiApp(options: ApiOptions): Hono<{ Variables: AuthVariables }> {
+export function createApiApp(rawOptions: ApiOptions): Hono<{ Variables: AuthVariables }> {
+  const executorId = rawOptions.executorId ?? processExecutorId();
+  const options: ApiOptions = { ...rawOptions, executorId };
   const app = new Hono<{ Variables: AuthVariables }>();
   app.use('*', cors());
   app.get('/health', (context) => context.json({ status: 'ok', plane: 'control' }));
@@ -169,12 +180,13 @@ function registerSessionRoutes(app: Hono<{ Variables: AuthVariables }>, options:
         message: asString(body.message),
         botId: asString(body.botId) || undefined,
         triggerType: 'interactive',
+        executorId: options.executorId,
       });
       const payload = `data: ${JSON.stringify({ type: 'text', delta: result.text, toolNames: result.toolNames })}\n\ndata: ${JSON.stringify({ type: 'done' })}\n\n`;
       return context.body(payload, 200, { 'content-type': 'text/event-stream' });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return context.json({ error: message }, isTurnClientError(error) ? 400 : 500);
+      const mapped = httpTurnError(error);
+      return context.json({ error: mapped.message }, mapped.status);
     }
   });
   app.get('/api/admin/audit-events', async (context) => {
@@ -786,23 +798,30 @@ function registerInternalRoutes(
     });
     return context.json({ ok: true });
   });
-  app.post('/api/internal/routines/run', async (context) => {
-    if (!matchesWorker(context.req.header(WORKER_SECRET_HEADER), options.workerSecret)) {
-      return context.json({ error: UNAUTHORIZED }, 401);
-    }
-    const body = asRecord(await context.req.json());
-    const channelId = asString(body.channelId);
-    const instruction = asString(body.instruction);
-    const ownerUserId = asString(body.ownerUserId);
-    const agentId = asString(body.agentId) || BOT;
-    const owner = await options.store.getUser(ownerUserId);
-    if (!channelId || !instruction || !owner) {
-      return context.json({ error: INVALID_BODY }, 400);
-    }
-    const channel = await options.store.getChannel(channelId, owner.id);
-    if (!channel) {
-      return context.json({ error: NOT_FOUND }, 404);
-    }
+  app.post('/api/internal/routines/run', (context) => postInternalRoutine(context, options));
+  app.post('/api/internal/runs/execute', (context) => postInternalRunExecute(context, options));
+}
+
+type ApiContext = Context<{ Variables: AuthVariables }>;
+
+async function postInternalRoutine(context: ApiContext, options: ApiOptions) {
+  if (!matchesWorker(context.req.header(WORKER_SECRET_HEADER), options.workerSecret)) {
+    return context.json({ error: UNAUTHORIZED }, 401);
+  }
+  const body = asRecord(await context.req.json());
+  const channelId = asString(body.channelId);
+  const instruction = asString(body.instruction);
+  const ownerUserId = asString(body.ownerUserId);
+  const agentId = asString(body.agentId) || BOT;
+  const owner = await options.store.getUser(ownerUserId);
+  if (!channelId || !instruction || !owner) {
+    return context.json({ error: INVALID_BODY }, 400);
+  }
+  const channel = await options.store.getChannel(channelId, owner.id);
+  if (!channel) {
+    return context.json({ error: NOT_FOUND }, 404);
+  }
+  try {
     const result = await executeTurn({
       store: options.store,
       agent: options.agent,
@@ -812,43 +831,99 @@ function registerInternalRoutes(
       message: instruction,
       botId: agentId,
       triggerType: 'routine',
+      executorId: options.executorId,
     });
     return context.json({ ok: true, text: result.text });
-  });
-  app.post('/api/internal/runs/execute', async (context) => {
-    if (!matchesWorker(context.req.header(WORKER_SECRET_HEADER), options.workerSecret)) {
-      return context.json({ error: UNAUTHORIZED }, 401);
+  } catch (error) {
+    const mapped = mapTurnError(error);
+    if (!mapped) {
+      throw error;
     }
-    const body = asRecord(await context.req.json());
-    const runId = asString(body.runId);
-    const run = await options.store.getRun(runId);
-    if (!run) {
-      return context.json({ error: INVALID_BODY }, 400);
-    }
-    const [owner, membership] = await Promise.all([
-      options.store.getUser(run.ownerUserId),
-      options.store.getMembership(run.ownerUserId),
-    ]);
-    if (!owner) {
-      return context.json({ error: INVALID_BODY }, 400);
-    }
-    if (!membershipCoversWorkspace(membership, run.workspaceId)) {
-      return context.json({ error: NOT_FOUND }, 404);
-    }
+    return context.json({ error: mapped.message }, mapped.status);
+  }
+}
+
+async function postInternalRunExecute(context: ApiContext, options: ApiOptions) {
+  if (!matchesWorker(context.req.header(WORKER_SECRET_HEADER), options.workerSecret)) {
+    return context.json({ error: UNAUTHORIZED }, 401);
+  }
+  const body = asRecord(await context.req.json());
+  const runId = asString(body.runId);
+  const workerId = asString(body.workerId);
+  const prepared = await prepareRunExecution(options.store, runId, workerId);
+  if (!prepared.ok) {
+    return context.json(prepared.body, prepared.status);
+  }
+  try {
     const result = await executeRun({
       store: options.store,
       agent: options.agent,
       mcpUrl: options.mcpUrl,
-      user: owner,
+      user: prepared.owner,
       runId,
-      run,
+      run: prepared.run,
+      executorId: workerId,
     });
-    return context.json({ ok: true, text: result.text, runId: result.runId });
-  });
+    return context.json({
+      ok: true,
+      outcome: result.outcome,
+      text: result.text,
+      runId: result.runId,
+    });
+  } catch (error) {
+    const mapped = httpTurnError(error);
+    return context.json({ error: mapped.message }, mapped.status);
+  }
+}
+
+async function prepareRunExecution(
+  store: GabotStore,
+  runId: string,
+  workerId: string,
+): Promise<
+  | { ok: true; owner: SessionUser; run: RunRecord }
+  | { body: Record<string, unknown>; ok: false; status: 400 | 404 }
+> {
+  if (!workerId) {
+    return { ok: false, status: 400, body: { error: INVALID_BODY } };
+  }
+  const run = await store.getRun(runId);
+  if (!run) {
+    return { ok: false, status: 400, body: { error: INVALID_BODY } };
+  }
+  const [owner, membership] = await Promise.all([
+    store.getUser(run.ownerUserId),
+    store.getMembership(run.ownerUserId),
+  ]);
+  if (!owner) {
+    return { ok: false, status: 400, body: { error: INVALID_BODY } };
+  }
+  if (!membershipCoversWorkspace(membership, run.workspaceId)) {
+    return { ok: false, status: 404, body: { error: NOT_FOUND } };
+  }
+  return { ok: true, owner, run };
 }
 
 function matchesWorker(offered: string | undefined, expected: string): boolean {
   return Boolean(expected) && matchesToken(expected, offered ?? '');
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function mapTurnError(error: unknown): { message: string; status: 400 | 409 } | null {
+  if (isRunFenced(error)) {
+    return { status: 409, message: error.message };
+  }
+  if (isTurnClientError(error)) {
+    return { status: 400, message: errorMessage(error) };
+  }
+  return null;
+}
+
+function httpTurnError(error: unknown): { message: string; status: 400 | 409 | 500 } {
+  return mapTurnError(error) ?? { status: 500, message: errorMessage(error) };
 }
 
 async function requireOwnedChannel(

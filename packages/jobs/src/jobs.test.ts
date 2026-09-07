@@ -6,7 +6,12 @@ import {
   deliverRoutine,
   deliverRun,
   runExecuteFailureDisposition,
+  shouldFinishRunExecute,
 } from './jobs.js';
+
+function okFetch(body: Record<string, unknown> = {}) {
+  return { json: () => Promise.resolve(body), ok: true };
+}
 
 describe('jobs', () => {
   it('exposes health and tick', async () => {
@@ -32,7 +37,7 @@ describe('jobs', () => {
   });
 
   it('posts a due routine to the control plane', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    const fetchMock = vi.fn().mockResolvedValue(okFetch());
     vi.stubGlobal('fetch', fetchMock);
     await deliverRoutine(
       {
@@ -52,10 +57,20 @@ describe('jobs', () => {
   });
 
   it('posts a durable run execute to the control plane', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    const fetchMock = vi.fn().mockResolvedValue(okFetch({ outcome: 'executed' }));
     vi.stubGlobal('fetch', fetchMock);
-    await deliverRun({ key: 'run-1', payload: { runId: 'run-1' } }, 'http://api:3001', 'secret');
+    const outcome = await deliverRun(
+      { key: 'run-1', payload: { runId: 'run-1' } },
+      'http://api:3001',
+      'secret',
+      'jobs-1',
+    );
+    expect(outcome).toBe('executed');
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/internal/runs/execute');
+    const init = fetchMock.mock.calls[0]?.[1] as { body?: unknown } | undefined;
+    const body = JSON.parse(String(init?.body)) as { runId?: string; workerId?: string };
+    expect(body.runId).toBe('run-1');
+    expect(body.workerId).toBe('jobs-1');
     vi.unstubAllGlobals();
   });
 
@@ -67,7 +82,12 @@ describe('jobs', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     await expect(
-      deliverRun({ key: 'run-1', payload: { runId: 'run-1' } }, 'http://api:3001', 'secret'),
+      deliverRun(
+        { key: 'run-1', payload: { runId: 'run-1' } },
+        'http://api:3001',
+        'secret',
+        'jobs-1',
+      ),
     ).rejects.toThrow('run missing');
     vi.unstubAllGlobals();
   });
@@ -87,5 +107,18 @@ describe('runExecuteFailureDisposition', () => {
     expect(runExecuteFailureDisposition('succeeded')).toBe('finish');
     expect(runExecuteFailureDisposition('cancelled')).toBe('finish');
     expect(runExecuteFailureDisposition(undefined)).toBe('finish');
+  });
+});
+
+describe('shouldFinishRunExecute', () => {
+  it('does not finish work after a busy outcome', () => {
+    expect(shouldFinishRunExecute('busy')).toBe(false);
+  });
+
+  it('finishes work after executed or terminal outcomes', () => {
+    expect(shouldFinishRunExecute('executed')).toBe(true);
+    expect(shouldFinishRunExecute('lost')).toBe(true);
+    expect(shouldFinishRunExecute('terminal')).toBe(true);
+    expect(shouldFinishRunExecute('')).toBe(true);
   });
 });

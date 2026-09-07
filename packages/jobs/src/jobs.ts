@@ -30,11 +30,17 @@ async function claimWork(
   `;
 }
 
-async function finishWork(sql: JobSql, kind: string, key: string, error?: string): Promise<void> {
+async function finishWork(
+  sql: JobSql,
+  kind: string,
+  key: string,
+  workerId: string,
+  error?: string,
+): Promise<void> {
   await sql`
     UPDATE work_items
     SET finished_at = now(), last_error = ${error ?? null}, updated_at = now()
-    WHERE kind = ${kind} AND key = ${key}
+    WHERE kind = ${kind} AND key = ${key} AND claimed_by = ${workerId}
   `;
 }
 
@@ -131,13 +137,22 @@ export async function deliverRoutine(
   await postInternal(apiUrl, '/api/internal/routines/run', secret, item.payload);
 }
 
+export function shouldFinishRunExecute(outcome: string): boolean {
+  return outcome !== 'busy';
+}
+
 export async function deliverRun(
   item: { key: string; payload: Record<string, unknown> },
   apiUrl: string,
   secret: string,
-): Promise<void> {
+  workerId: string,
+): Promise<string> {
   const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
-  await postInternal(apiUrl, '/api/internal/runs/execute', secret, { runId });
+  const payload = await postInternal(apiUrl, '/api/internal/runs/execute', secret, {
+    runId,
+    workerId,
+  });
+  return typeof payload.outcome === 'string' ? payload.outcome : '';
 }
 
 async function postInternal(
@@ -145,7 +160,7 @@ async function postInternal(
   path: string,
   secret: string,
   body: unknown,
-): Promise<void> {
+): Promise<Record<string, unknown>> {
   const response = await fetch(`${apiUrl.replace(/\/$/, '')}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': secret },
@@ -155,6 +170,7 @@ async function postInternal(
     const payload = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(payload.error ?? `HTTP ${String(response.status)}`);
   }
+  return (await response.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
 export async function runTick(input: {
@@ -175,7 +191,7 @@ type WorkItem = { kind: string; key: string; payload: Record<string, unknown> };
 
 async function handleItem(
   item: WorkItem,
-  input: { sql: JobSql; apiUrl: string; secret: string },
+  input: { sql: JobSql; apiUrl: string; secret: string; workerId: string },
 ): Promise<void> {
   try {
     switch (item.kind) {
@@ -188,23 +204,31 @@ async function handleItem(
         break;
       }
       case 'run.execute': {
-        await deliverRun(item, input.apiUrl, input.secret);
+        const outcome = await deliverRun(item, input.apiUrl, input.secret, input.workerId);
+        if (!shouldFinishRunExecute(outcome)) {
+          return;
+        }
         break;
       }
       default: {
         break;
       }
     }
-    await finishWork(input.sql, item.kind, item.key);
+    await finishWork(input.sql, item.kind, item.key, input.workerId);
   } catch (error) {
-    await settleFailedItem(item, input.sql, error);
+    await settleFailedItem(item, input.sql, input.workerId, error);
   }
 }
 
-async function settleFailedItem(item: WorkItem, sql: JobSql, error: unknown): Promise<void> {
+async function settleFailedItem(
+  item: WorkItem,
+  sql: JobSql,
+  workerId: string,
+  error: unknown,
+): Promise<void> {
   const message = error instanceof Error ? error.message : 'job failed';
   if (item.kind !== 'run.execute') {
-    await finishWork(sql, item.kind, item.key, message);
+    await finishWork(sql, item.kind, item.key, workerId, message);
     return;
   }
   const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
@@ -220,7 +244,7 @@ async function settleFailedItem(item: WorkItem, sql: JobSql, error: unknown): Pr
     await holdWork(sql, item.kind, item.key, message);
     return;
   }
-  await finishWork(sql, item.kind, item.key, message);
+  await finishWork(sql, item.kind, item.key, workerId, message);
 }
 
 export function createJobsApp(tick: () => Promise<unknown>): Hono {

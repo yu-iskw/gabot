@@ -23,6 +23,7 @@ import { SCHEMA_SQL } from './db/schema-sql.js';
 import * as schema from './db/schema.js';
 import { runGatewayAction } from './gateway.js';
 import { MemoryStore } from './store/memory-store.js';
+import { RUN_EXECUTE_KIND, RUN_LEASE_LOST } from './store/types.js';
 import { createScriptedAgentRunner, executeRun, executeTurn } from './turns.js';
 
 import type { VerifiedPerson } from '@gabot/common';
@@ -285,8 +286,14 @@ describe('control plane', () => {
       triggerType: 'interactive',
       message: 'hello',
     });
+    expect(result.outcome).toBe('executed');
     expect(result.toolNames).toEqual([]);
     expect(result.text.toLowerCase()).toContain('gabot');
+    const messages = await store.listMessages(defaultChannel);
+    expect(messages.some((row) => row.role === 'assistant' && row.content === result.text)).toBe(
+      true,
+    );
+    expect(await store.claimWork('jobs', 10)).toHaveLength(0);
   });
 
   it('refuses MCP echo without a grant', async () => {
@@ -713,20 +720,21 @@ describe('turns and runs', () => {
       triggerType: 'interactive',
     });
     const lost = await store.claimWork('dead', 10);
-    expect(lost[0]?.kind).toBe('run.execute');
+    expect(lost[0]?.kind).toBe(RUN_EXECUTE_KIND);
     const later = new Date(Date.now() + 6 * 60_000);
     const reclaimed = await store.claimWork('alive', 10, later);
     expect(reclaimed).toHaveLength(1);
     const runId = asString(reclaimed[0]?.payload.runId, reclaimed[0]?.key ?? '');
-    const child = await executeRun({ ...deps, runId });
+    const child = await executeRun({ ...deps, runId, executorId: 'alive' });
     expect(child.runId).toBe(runId);
+    expect(child.outcome).toBe('executed');
     const run = await store.getRun(runId);
     expect(run?.status).toBe('succeeded');
     const app = appWith(store);
     const internal = await app.request('/api/internal/runs/execute', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': 'worker' },
-      body: JSON.stringify({ runId }),
+      body: JSON.stringify({ runId, workerId: 'alive' }),
     });
     expect(internal.status).toBe(200);
   });
@@ -749,7 +757,7 @@ describe('turns and runs', () => {
     expect(await store.listMessages(defaultChannel)).toHaveLength(0);
   });
 
-  it('resumes a running child run after a crash', async () => {
+  it('fails a stale running child run instead of replaying it', async () => {
     const store = new MemoryStore();
     await store.upsertUser(person, admins);
     const workspace = await store.getWorkspaceForUser(person.id);
@@ -764,6 +772,7 @@ describe('turns and runs', () => {
       objective: 'already in flight',
       authority: rootAuthority(['delegate_to_bot']),
       depth: 1,
+      parentRunId: 'parent-run',
     });
     const result = await executeRun({
       store,
@@ -771,9 +780,74 @@ describe('turns and runs', () => {
       mcpUrl: 'http://mcp.test',
       user: { ...person, isAdmin: true },
       runId: run.id,
+      executorId: 'jobs',
     });
-    expect(result.text).toBeDefined();
-    expect((await store.getRun(run.id))?.status).toBe('succeeded');
+    expect(result).toEqual({ outcome: 'lost', runId: run.id, text: '', toolNames: [] });
+    const stored = await store.getRun(run.id);
+    expect(stored?.status).toBe('failed');
+    expect(stored?.error).toBe(RUN_LEASE_LOST);
+    const events = await store.listChannelEvents(defaultChannel);
+    expect(events.some((row) => row.type === 'agent.delegation.failed')).toBe(true);
+  });
+
+  it('does not start a second executor while a live HTTP lease is held', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, admins);
+    const workspace = await store.getWorkspaceForUser(person.id);
+    if (!workspace) {
+      throw new Error('workspace missing');
+    }
+    const admitted = await store.admitRootRun({
+      workspaceId: workspace.id,
+      projectId: workspace.projectId,
+      channelId: defaultChannel,
+      botId: 'general-assistant',
+      ownerUserId: person.id,
+      triggerType: 'interactive',
+      message: 'hello',
+      authority: rootAuthority(TURN_TOOL_NAMES),
+      executorId: 'http-1',
+    });
+    const result = await executeRun({
+      ...scriptedDeps(store),
+      runId: admitted.run.id,
+      executorId: 'http-2',
+    });
+    expect(result.outcome).toBe('busy');
+    expect((await store.getRun(admitted.run.id))?.status).toBe('queued');
+  });
+
+  it('lets a worker execute a queued root after the HTTP lease lapses', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, admins);
+    const workspace = await store.getWorkspaceForUser(person.id);
+    if (!workspace) {
+      throw new Error('workspace missing');
+    }
+    const admittedAt = new Date();
+    const admitted = await store.admitRootRun({
+      workspaceId: workspace.id,
+      projectId: workspace.projectId,
+      channelId: defaultChannel,
+      botId: 'general-assistant',
+      ownerUserId: person.id,
+      triggerType: 'interactive',
+      message: 'hello',
+      authority: rootAuthority(TURN_TOOL_NAMES),
+      executorId: 'http-1',
+      now: admittedAt,
+    });
+    expect(await store.claimWork('jobs', 10, admittedAt)).toHaveLength(0);
+    const later = new Date(admittedAt.getTime() + 6 * 60_000);
+    const claimed = await store.claimWork('jobs', 10, later);
+    expect(claimed).toHaveLength(1);
+    const result = await executeRun({
+      ...scriptedDeps(store),
+      runId: admitted.run.id,
+      executorId: 'jobs',
+    });
+    expect(result.outcome).toBe('executed');
+    expect((await store.getRun(admitted.run.id))?.status).toBe('succeeded');
   });
 
   it('does not rerun a failed hop', async () => {
@@ -799,7 +873,7 @@ describe('turns and runs', () => {
       user: { ...person, isAdmin: true },
       runId: run.id,
     });
-    expect(result).toEqual({ runId: run.id, text: '', toolNames: [] });
+    expect(result).toEqual({ outcome: 'terminal', runId: run.id, text: '', toolNames: [] });
     expect((await store.getRun(run.id))?.status).toBe('failed');
   });
 
@@ -1718,7 +1792,7 @@ describe('workspace roles and revocation', () => {
     const executed = await app.request('/api/internal/runs/execute', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-gabot-worker-secret': 'worker' },
-      body: JSON.stringify({ runId: run.id }),
+      body: JSON.stringify({ runId: run.id, workerId: 'jobs' }),
     });
     expect(executed.status).toBe(404);
     expect((await store.getRun(run.id))?.ownerUserId).toBe(person.id);
@@ -1752,21 +1826,17 @@ describe('workspace roles and revocation', () => {
   });
 });
 
-async function drainRuns(deps: {
-  agent: ReturnType<typeof createScriptedAgentRunner>;
-  mcpUrl: string;
-  store: MemoryStore;
-  user: { email: string; id: string; isAdmin: boolean; name: string };
-}): Promise<void> {
+async function drainRuns(deps: ReturnType<typeof scriptedDeps>): Promise<void> {
   for (let step = 0; step < 8; step += 1) {
-    const items = await deps.store.claimWork(`drain-${String(step)}`, 10);
-    const jobs = items.filter((item) => item.kind === 'run.execute');
+    const executorId = `drain-${String(step)}`;
+    const items = await deps.store.claimWork(executorId, 10);
+    const jobs = items.filter((item) => item.kind === RUN_EXECUTE_KIND);
     if (jobs.length === 0) {
       return;
     }
     for (const item of jobs) {
       const runId = asString(item.payload.runId, item.key);
-      await executeRun({ ...deps, runId });
+      await executeRun({ ...deps, runId, executorId });
       await deps.store.finishWork(item.kind, item.key);
     }
   }
