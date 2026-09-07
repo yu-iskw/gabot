@@ -11,6 +11,10 @@ export function syncAuthQueryCache(
   next: AuthCacheIdentity,
 ): void {
   if (previous.uid !== next.uid || previous.generation !== next.generation) {
-    queryClient.clear();
+    // Keep the public workspace directory; clearing it drops `entry`/`auth` and
+    // re-enters onAuthStateChanged in a loop (sign-in never leaves /sign).
+    queryClient.removeQueries({
+      predicate: (query) => query.queryKey[0] !== 'workspace-directory',
+    });
   }
 }

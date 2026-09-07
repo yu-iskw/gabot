@@ -28,7 +28,8 @@ function workspaceApiProxy(): Plugin {
           res.end(JSON.stringify(toPublicWorkspaceListing(directory)));
           return;
         }
-        if (!urlPath.startsWith('/api')) {
+        // Home/task pages call /v1/*; channel/admin surfaces still use /api/*.
+        if (!urlPath.startsWith('/api') && !urlPath.startsWith('/v1')) {
           next();
           return;
         }
@@ -40,8 +41,13 @@ function workspaceApiProxy(): Plugin {
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
           }
           const method = req.method ?? 'GET';
+          const raw = Buffer.concat(chunks);
+          // Copy into a precise Uint8Array — Buffer.buffer can include pooled bytes
+          // outside the payload and breaks undici fetch ("fetch failed").
           const body =
-            method === 'GET' || method === 'HEAD' ? undefined : Buffer.concat(chunks).buffer;
+            method === 'GET' || method === 'HEAD' || raw.length === 0
+              ? undefined
+              : Uint8Array.from(raw);
           const headers = new Headers();
           for (const [key, value] of Object.entries(req.headers)) {
             if (typeof value === 'string') {

@@ -95,7 +95,7 @@ function resolveUpstream(
 }
 
 export async function proxyApiRequest(input: {
-  body?: ArrayBuffer;
+  body?: BodyInit;
   directory: WorkspaceDirectory;
   headers: Headers;
   method: string;
