@@ -203,9 +203,97 @@ export type RunRecord = {
   rootRunId: string;
   startedAt: Date | null;
   status: RunStatus;
+  taskId: string | null;
   triggerType: RunTriggerType;
   workspaceId: string;
 };
+
+export type TaskStatus =
+  | 'blocked'
+  | 'cancelled'
+  | 'completed'
+  | 'failed'
+  | 'partial'
+  | 'queued'
+  | 'working';
+
+export type TaskRecord = {
+  audience: string;
+  botId: string;
+  channelId: string;
+  createdAt: Date;
+  createdBy: string;
+  currentArtifactId: string | null;
+  currentRunId: string | null;
+  id: string;
+  idempotencyKey: string;
+  objective: string;
+  projectId: string;
+  requestDigest: string;
+  resourceScope: string[];
+  status: TaskStatus;
+  successCriteria: string;
+  updatedAt: Date;
+  workspaceId: string;
+};
+
+export type ArtifactRecord = {
+  audience: string;
+  classification: string;
+  content: string;
+  contentRef: string;
+  createdAt: Date;
+  id: string;
+  kind: string;
+  provenance: Record<string, unknown>;
+  runId: string;
+  taskId: string;
+  validationStatus: string;
+  version: number;
+};
+
+export type SequencedRunEventRecord = {
+  createdAt: Date;
+  payload: Record<string, unknown>;
+  runId: string;
+  schemaVersion: number;
+  sequence: number;
+  type: string;
+};
+
+export type TaskAdmissionInput = {
+  audience: string;
+  authority: AuthorityEnvelope;
+  botId: string;
+  channelId: string;
+  idempotencyKey: string;
+  now?: Date;
+  objective: string;
+  ownerUserId: string;
+  projectId: string;
+  requestDigest: string;
+  resourceScope: string[];
+  successCriteria: string;
+  workspaceId: string;
+};
+
+export type AdmittedTask = {
+  created: boolean;
+  run: RunRecord;
+  task: TaskRecord;
+};
+
+export type TaskSnapshotRecord = {
+  artifact: ArtifactRecord | null;
+  task: TaskRecord;
+};
+
+export class TaskIdempotencyConflictError extends Error {
+  public constructor() {
+    super('Idempotency key was reused with a different request digest.');
+    this.name = 'TaskIdempotencyConflictError';
+  }
+}
 
 export type CreateRunInput = {
   authority: AuthorityEnvelope;
@@ -456,6 +544,25 @@ export type GabotStore = {
    * The only way a run leaves 'running'. Null means fenced out; callers must not report success.
    */
   settleRun(input: SettleRunInput): Promise<RunRecord | null>;
+  admitTask(input: TaskAdmissionInput): Promise<AdmittedTask>;
+  getTask(taskId: string): Promise<TaskRecord | null>;
+  getTaskSnapshot(taskId: string): Promise<TaskSnapshotRecord | null>;
+  listTasks(workspaceId: string, limit?: number): Promise<TaskRecord[]>;
+  listRunEvents(runId: string, afterSequence?: number): Promise<SequencedRunEventRecord[]>;
+  appendRunEvent(input: {
+    payload?: Record<string, unknown>;
+    runId: string;
+    type: string;
+  }): Promise<SequencedRunEventRecord>;
+  markTaskWorking(taskId: string, runId: string): Promise<TaskRecord | null>;
+  completeTaskAttempt(input: {
+    artifactContent: string;
+    artifactKind?: string;
+    contractMet: boolean;
+    runId: string;
+    taskId: string;
+  }): Promise<TaskSnapshotRecord | null>;
+  cancelTask(taskId: string, runId: string): Promise<TaskRecord | null>;
 };
 
 export const PROTECTED_AGENT_ID = GENERAL_ASSISTANT_ID;

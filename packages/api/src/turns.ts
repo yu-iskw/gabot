@@ -4,12 +4,14 @@ import { HttpAgent } from '@ag-ui/client';
 import {
   botIdentityContent,
   buildDelegateToBotTool,
+  buildDiagnosisArtifactContent,
   collectAguiObservable,
   collectText,
   collectToolCalls,
   configuredModelStepsPerRun,
   decideScriptedTurn,
   DELEGATE_TO_BOT,
+  diagnosisArtifactMeetsCriteria,
   membershipCoversWorkspace,
   mentionedBotId,
   rootAuthority,
@@ -237,6 +239,9 @@ export async function executeRun(input: ExecuteRunInput): Promise<TurnResult> {
 }
 
 async function runToCompletion(input: HeldTurn, run: RunRecord): Promise<TurnResult> {
+  if (run.taskId) {
+    await input.store.markTaskWorking(run.taskId, run.id);
+  }
   try {
     return await completeRun(input, run);
   } catch (error) {
@@ -312,6 +317,9 @@ async function completeRun(input: HeldTurn, run: RunRecord): Promise<TurnResult>
     actorType: 'bot',
     actorId: run.botId,
   });
+  if (run.taskId) {
+    await finalizeTaskAttempt(input.store, run, text);
+  }
   if (run.parentRunId) {
     await recordRunEvent(input.store, {
       run,
@@ -322,6 +330,33 @@ async function completeRun(input: HeldTurn, run: RunRecord): Promise<TurnResult>
     });
   }
   return { outcome: 'executed', runId: run.id, text, toolNames };
+}
+
+async function finalizeTaskAttempt(
+  store: GabotStore,
+  run: RunRecord,
+  modelText: string,
+): Promise<void> {
+  if (!run.taskId) {
+    return;
+  }
+  const task = await store.getTask(run.taskId);
+  if (!task) {
+    return;
+  }
+  const content = buildDiagnosisArtifactContent(run.objective, modelText);
+  const contractMet = diagnosisArtifactMeetsCriteria(task.successCriteria, content);
+  await store.completeTaskAttempt({
+    taskId: run.taskId,
+    runId: run.id,
+    artifactContent: content,
+    contractMet,
+  });
+  await store.appendRunEvent({
+    runId: run.id,
+    type: 'artifact.persisted',
+    payload: { taskId: run.taskId, contractMet },
+  });
 }
 
 async function assertHeld(input: HeldTurn, run: RunRecord): Promise<void> {

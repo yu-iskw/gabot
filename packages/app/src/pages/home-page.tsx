@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 
-import { apiJson, readTurnStream } from '../api.js';
+import { apiJson } from '../api.js';
 import { AgentCard } from '../components/agents/agent-card.js';
 import { Composer } from '../components/channels/composer.js';
 import { SidebarToggleBar } from '../components/layout/sidebar-toggle.js';
@@ -80,19 +80,26 @@ export function HomePage() {
         ),
         description: description || undefined,
       });
-      await readTurnStream(
-        `/api/channels/${channel.id}/turns`,
-        await token(),
-        input.message,
-        input.botId,
+      const admitted = await apiJson<{ runId: string; taskId: string }>(
+        '/v1/tasks',
+        auth,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            objective: input.message,
+            channelId: channel.id,
+            botId: input.botId || undefined,
+            idempotencyKey: crypto.randomUUID(),
+          }),
+        },
       );
-      return channel;
+      return { channel, taskId: admitted.taskId };
     },
-    onSuccess: async (channel) => {
+    onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKey('channels') });
       await navigate({
-        to: '/workspaces/$workspaceSlug/channels/$channelPublicId',
-        params: { workspaceSlug: slug, channelPublicId: channel.publicId },
+        to: '/workspaces/$workspaceSlug/tasks/$taskId',
+        params: { workspaceSlug: slug, taskId: result.taskId },
       });
     },
   });
@@ -106,7 +113,7 @@ export function HomePage() {
             gabot
           </h2>
           <h1 className="mt-1.5 text-center text-2xl font-bold tracking-tight">
-            Start a new channel
+            Start a durable task
           </h1>
         </div>
         <div className="mt-8 flex w-full max-w-2xl flex-col items-center">

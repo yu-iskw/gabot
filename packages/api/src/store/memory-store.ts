@@ -30,6 +30,7 @@ import {
   PROTECTED_AGENT_ID,
   RUN_EXECUTE_KIND,
   RUN_LEASE_LOST,
+  TaskIdempotencyConflictError,
   WORK_LEASE_MS,
   WORKSPACE_NOT_FOUND,
 } from './types.js';
@@ -37,8 +38,10 @@ import {
 import type {
   AcquireRunInput,
   AdmittedRun,
+  AdmittedTask,
   AgentPatch,
   AgentProfile,
+  ArtifactRecord,
   AuditListScope,
   AuditRecord,
   CapabilityGrantRecord,
@@ -67,9 +70,13 @@ import type {
   RunLease,
   RunRecord,
   RunStatus,
+  SequencedRunEventRecord,
   SessionUser,
   SettleRunInput,
   SkillRecord,
+  TaskAdmissionInput,
+  TaskRecord,
+  TaskSnapshotRecord,
   WorkRecord,
   WorkspaceRecord,
 } from './types.js';
@@ -116,6 +123,10 @@ export class MemoryStore implements GabotStore {
   private readonly events: ChannelEventRecord[] = [];
   private readonly channelPolicies: ChannelPolicyRecord[] = [];
   private readonly runs = new Map<string, RunRecord>();
+  private readonly tasks = new Map<string, TaskRecord>();
+  private readonly artifacts = new Map<string, ArtifactRecord>();
+  private readonly runEvents: SequencedRunEventRecord[] = [];
+  private readonly outbox: { id: string; kind: string; payload: Record<string, unknown> }[] = [];
   private readonly delegations: DelegationRecord[] = [];
   private readonly messages: MessageRecord[] = [];
   private readonly threads: ThreadRow[] = [];
@@ -702,6 +713,7 @@ export class MemoryStore implements GabotStore {
       startedAt: input.status === 'running' ? new Date() : null,
       finishedAt: null,
       error: null,
+      taskId: null,
     };
     this.runs.set(id, record);
     return { ...record, authority: cloneAuthority(record.authority) };
@@ -814,6 +826,7 @@ export class MemoryStore implements GabotStore {
       startedAt: null,
       finishedAt: null,
       error: null,
+      taskId: null,
     };
     this.runs.set(id, run);
 
@@ -908,6 +921,239 @@ export class MemoryStore implements GabotStore {
       work.lastError = input.error ?? null;
     }
     return cloneRun(run);
+  }
+
+  public async admitTask(input: TaskAdmissionInput): Promise<AdmittedTask> {
+    const now = input.now ?? new Date();
+    const existing = [...this.tasks.values()].find(
+      (row) =>
+        row.createdBy === input.ownerUserId &&
+        row.workspaceId === input.workspaceId &&
+        row.idempotencyKey === input.idempotencyKey,
+    );
+    if (existing) {
+      if (existing.requestDigest !== input.requestDigest) {
+        throw new TaskIdempotencyConflictError();
+      }
+      const run = existing.currentRunId ? this.runs.get(existing.currentRunId) : undefined;
+      if (!run) {
+        throw new Error('Admitted task is missing its run.');
+      }
+      return { created: false, task: cloneTask(existing), run: cloneRun(run) };
+    }
+
+    const taskId = randomUUID();
+    const runId = randomUUID();
+    const task: TaskRecord = {
+      id: taskId,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      channelId: input.channelId,
+      createdBy: input.ownerUserId,
+      botId: input.botId,
+      objective: input.objective,
+      audience: input.audience,
+      successCriteria: input.successCriteria,
+      resourceScope: [...input.resourceScope],
+      status: 'queued',
+      currentRunId: runId,
+      currentArtifactId: null,
+      idempotencyKey: input.idempotencyKey,
+      requestDigest: input.requestDigest,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const run: RunRecord = {
+      id: runId,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      channelId: input.channelId,
+      parentRunId: null,
+      rootRunId: runId,
+      botId: input.botId,
+      ownerUserId: input.ownerUserId,
+      triggerType: 'interactive',
+      status: 'queued',
+      objective: input.objective,
+      authority: cloneAuthority(input.authority),
+      depth: 0,
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+      taskId,
+    };
+    this.tasks.set(taskId, task);
+    this.runs.set(runId, run);
+    this.messages.push({
+      id: randomUUID(),
+      channelId: input.channelId,
+      role: 'user',
+      content: input.objective,
+      agentId: null,
+      createdAt: now,
+    });
+    const channel = this.channels.get(input.channelId);
+    if (channel) {
+      channel.lastMessage = input.objective;
+    }
+    this.work.push({
+      kind: RUN_EXECUTE_KIND,
+      key: runId,
+      payload: { runId, taskId },
+      runAt: now,
+      claimedBy: null,
+      leaseUntil: null,
+      attempts: 0,
+      finishedAt: null,
+      lastError: null,
+    });
+    this.runEvents.push({
+      runId,
+      sequence: 1,
+      type: 'task.admitted',
+      schemaVersion: 1,
+      payload: { taskId },
+      createdAt: now,
+    });
+    this.outbox.push({
+      id: randomUUID(),
+      kind: 'task.admitted',
+      payload: { taskId, runId },
+    });
+    return { created: true, task: cloneTask(task), run: cloneRun(run) };
+  }
+
+  public async getTask(taskId: string): Promise<TaskRecord | null> {
+    const row = this.tasks.get(taskId);
+    return row ? cloneTask(row) : null;
+  }
+
+  public async getTaskSnapshot(taskId: string): Promise<TaskSnapshotRecord | null> {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      return null;
+    }
+    const artifact = task.currentArtifactId
+      ? (this.artifacts.get(task.currentArtifactId) ?? null)
+      : null;
+    return {
+      task: cloneTask(task),
+      artifact: artifact ? cloneArtifact(artifact) : null,
+    };
+  }
+
+  public async listTasks(workspaceId: string, limit = 50): Promise<TaskRecord[]> {
+    return [...this.tasks.values()]
+      .filter((row) => row.workspaceId === workspaceId)
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+      .slice(0, limit)
+      .map(cloneTask);
+  }
+
+  public async listRunEvents(
+    runId: string,
+    afterSequence = 0,
+  ): Promise<SequencedRunEventRecord[]> {
+    return this.runEvents
+      .filter((row) => row.runId === runId && row.sequence > afterSequence)
+      .sort((left, right) => left.sequence - right.sequence)
+      .map(cloneRunEvent);
+  }
+
+  public async appendRunEvent(input: {
+    payload?: Record<string, unknown>;
+    runId: string;
+    type: string;
+  }): Promise<SequencedRunEventRecord> {
+    const sequence =
+      this.runEvents.filter((row) => row.runId === input.runId).reduce((max, row) => {
+        return Math.max(max, row.sequence);
+      }, 0) + 1;
+    const event: SequencedRunEventRecord = {
+      runId: input.runId,
+      sequence,
+      type: input.type,
+      schemaVersion: 1,
+      payload: input.payload ?? {},
+      createdAt: new Date(),
+    };
+    this.runEvents.push(event);
+    return cloneRunEvent(event);
+  }
+
+  public async markTaskWorking(taskId: string, runId: string): Promise<TaskRecord | null> {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      return null;
+    }
+    task.status = 'working';
+    task.currentRunId = runId;
+    task.updatedAt = new Date();
+    await this.appendRunEvent({ runId, type: 'task.working', payload: { taskId } });
+    return cloneTask(task);
+  }
+
+  public async completeTaskAttempt(input: {
+    artifactContent: string;
+    artifactKind?: string;
+    contractMet: boolean;
+    runId: string;
+    taskId: string;
+  }): Promise<TaskSnapshotRecord | null> {
+    const task = this.tasks.get(input.taskId);
+    if (!task) {
+      return null;
+    }
+    const version =
+      [...this.artifacts.values()].filter((row) => row.taskId === input.taskId).length + 1;
+    const artifactId = randomUUID();
+    const artifact: ArtifactRecord = {
+      id: artifactId,
+      taskId: input.taskId,
+      runId: input.runId,
+      version,
+      kind: input.artifactKind ?? 'diagnosis',
+      content: input.artifactContent,
+      contentRef: `memory://artifacts/${artifactId}`,
+      provenance: { runId: input.runId },
+      classification: 'internal',
+      audience: task.audience,
+      validationStatus: input.contractMet ? 'accepted' : 'unchecked',
+      createdAt: new Date(),
+    };
+    this.artifacts.set(artifactId, artifact);
+    task.currentArtifactId = artifactId;
+    task.status = input.contractMet ? 'completed' : 'partial';
+    task.updatedAt = new Date();
+    await this.appendRunEvent({
+      runId: input.runId,
+      type: input.contractMet ? 'task.completed' : 'task.partial',
+      payload: { taskId: input.taskId, artifactId, version },
+    });
+    return { task: cloneTask(task), artifact: cloneArtifact(artifact) };
+  }
+
+  public async cancelTask(taskId: string, runId: string): Promise<TaskRecord | null> {
+    const task = this.tasks.get(taskId);
+    const run = this.runs.get(runId);
+    if (!task || !run) {
+      return null;
+    }
+    if (task.status === 'completed' || task.status === 'cancelled') {
+      return cloneTask(task);
+    }
+    task.status = 'cancelled';
+    task.updatedAt = new Date();
+    if (run.status === 'queued' || run.status === 'running') {
+      run.status = 'cancelled';
+      run.finishedAt = new Date();
+      const work = this.executeWork(runId);
+      if (work && work.finishedAt === null) {
+        work.finishedAt = new Date();
+      }
+    }
+    await this.appendRunEvent({ runId, type: 'task.cancelled', payload: { taskId } });
+    return cloneTask(task);
   }
 
   public async listSkills(): Promise<SkillRecord[]> {
@@ -1335,6 +1581,18 @@ function findChannelInMap(
 
 function cloneRun(row: RunRecord): RunRecord {
   return { ...row, authority: cloneAuthority(row.authority) };
+}
+
+function cloneTask(row: TaskRecord): TaskRecord {
+  return { ...row, resourceScope: [...row.resourceScope] };
+}
+
+function cloneArtifact(row: ArtifactRecord): ArtifactRecord {
+  return { ...row, provenance: { ...row.provenance } };
+}
+
+function cloneRunEvent(row: SequencedRunEventRecord): SequencedRunEventRecord {
+  return { ...row, payload: { ...row.payload } };
 }
 
 function auditInScope(row: AuditRecord, scope: AuditListScope): boolean {
