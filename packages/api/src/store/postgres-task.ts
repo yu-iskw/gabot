@@ -62,7 +62,10 @@ type DbRunEvent = {
   type: string;
 };
 
-export async function insertAdmittedTask(sql: Sql, input: TaskAdmissionInput): Promise<AdmittedTask> {
+export async function insertAdmittedTask(
+  sql: Sql,
+  input: TaskAdmissionInput,
+): Promise<AdmittedTask> {
   return sql.begin((tx) => writeAdmittedTask(tx, input));
 }
 
@@ -187,7 +190,9 @@ export async function selectTaskSnapshot(
   if (!task.currentArtifactId) {
     return { task, artifact: null };
   }
-  const rows = await sql<DbArtifact[]>`SELECT * FROM artifacts WHERE id = ${task.currentArtifactId}`;
+  const rows = await sql<
+    DbArtifact[]
+  >`SELECT * FROM artifacts WHERE id = ${task.currentArtifactId}`;
   const row = rows.at(0);
   return { task, artifact: row ? toArtifactRecord(row) : null };
 }

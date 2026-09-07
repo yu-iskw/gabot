@@ -102,7 +102,10 @@ export function parseTaskAdmitRequest(value: unknown): ContractResult<TaskAdmitR
   if (!successCriteriaRaw.ok) {
     return successCriteriaRaw;
   }
-  const audienceRaw = parseOptionalNonEmptyString(record.value.audience, 'audience must be a string.');
+  const audienceRaw = parseOptionalNonEmptyString(
+    record.value.audience,
+    'audience must be a string.',
+  );
   if (!audienceRaw.ok) {
     return audienceRaw;
   }
@@ -126,12 +129,7 @@ export function parseTaskAdmitRequest(value: unknown): ContractResult<TaskAdmitR
 }
 
 export function parseTaskStatus(value: unknown): ContractResult<TaskStatus> {
-  return parseStringUnion(
-    value,
-    TASK_STATUSES,
-    'task status is required.',
-    'Invalid task status.',
-  );
+  return parseStringUnion(value, TASK_STATUSES, 'task status is required.', 'Invalid task status.');
 }
 
 export function digestTaskAdmitRequest(request: TaskAdmitRequest): string {

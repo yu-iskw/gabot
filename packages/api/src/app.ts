@@ -432,10 +432,7 @@ function registerTaskRoutes(app: Hono<{ Variables: AuthVariables }>, options: Ap
       return context.json({ error: NOT_FOUND }, 404);
     }
     const after = Number(context.req.query('after') ?? '0');
-    const events = await options.store.listRunEvents(
-      run.id,
-      Number.isFinite(after) ? after : 0,
-    );
+    const events = await options.store.listRunEvents(run.id, Number.isFinite(after) ? after : 0);
     return context.json({
       events: events.map((event) => ({
         runId: event.runId,

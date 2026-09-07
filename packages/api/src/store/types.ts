@@ -209,13 +209,7 @@ export type RunRecord = {
 };
 
 export type TaskStatus =
-  | 'blocked'
-  | 'cancelled'
-  | 'completed'
-  | 'failed'
-  | 'partial'
-  | 'queued'
-  | 'working';
+  'blocked' | 'cancelled' | 'completed' | 'failed' | 'partial' | 'queued' | 'working';
 
 export type TaskRecord = {
   audience: string;

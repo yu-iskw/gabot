@@ -1230,10 +1230,7 @@ export class PostgresStore implements GabotStore {
     return selectTasks(this.sql, workspaceId, limit);
   }
 
-  public async listRunEvents(
-    runId: string,
-    afterSequence = 0,
-  ): Promise<SequencedRunEventRecord[]> {
+  public async listRunEvents(runId: string, afterSequence = 0): Promise<SequencedRunEventRecord[]> {
     return selectRunEvents(this.sql, runId, afterSequence);
   }
 

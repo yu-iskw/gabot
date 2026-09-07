@@ -80,19 +80,15 @@ export function HomePage() {
         ),
         description: description || undefined,
       });
-      const admitted = await apiJson<{ runId: string; taskId: string }>(
-        '/v1/tasks',
-        auth,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            objective: input.message,
-            channelId: channel.id,
-            botId: input.botId || undefined,
-            idempotencyKey: crypto.randomUUID(),
-          }),
-        },
-      );
+      const admitted = await apiJson<{ runId: string; taskId: string }>('/v1/tasks', auth, {
+        method: 'POST',
+        body: JSON.stringify({
+          objective: input.message,
+          channelId: channel.id,
+          botId: input.botId || undefined,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      });
       return { channel, taskId: admitted.taskId };
     },
     onSuccess: async (result) => {

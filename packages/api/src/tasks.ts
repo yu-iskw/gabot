@@ -32,10 +32,7 @@ type AdmitTaskDeps = {
   user: SessionUser;
 };
 
-export async function admitTaskRequest(
-  deps: AdmitTaskDeps,
-  body: unknown,
-): Promise<AdmittedTask> {
+export async function admitTaskRequest(deps: AdmitTaskDeps, body: unknown): Promise<AdmittedTask> {
   const parsed = parseTaskAdmitRequest(body);
   if (!parsed.ok) {
     throw new TaskAdmitClientError(parsed.reason);
@@ -54,7 +51,9 @@ export async function admitTaskRequest(
     throw new TaskAdmitClientError(`Channel ${request.channelId} is not in a workspace project.`);
   }
   if (!participating) {
-    throw new TaskAdmitClientError(`Bot ${botId} is not a participant on channel ${request.channelId}.`);
+    throw new TaskAdmitClientError(
+      `Bot ${botId} is not a participant on channel ${request.channelId}.`,
+    );
   }
   if (!membershipCoversWorkspace(membership, scope.workspaceId)) {
     throw new TaskAdmitClientError(

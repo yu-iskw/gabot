@@ -80,4 +80,3 @@ export function toRunRecord(row: DbRun): RunRecord {
     taskId: row.task_id,
   };
 }
-

@@ -1050,10 +1050,7 @@ export class MemoryStore implements GabotStore {
       .map(cloneTask);
   }
 
-  public async listRunEvents(
-    runId: string,
-    afterSequence = 0,
-  ): Promise<SequencedRunEventRecord[]> {
+  public async listRunEvents(runId: string, afterSequence = 0): Promise<SequencedRunEventRecord[]> {
     return this.runEvents
       .filter((row) => row.runId === runId && row.sequence > afterSequence)
       .sort((left, right) => left.sequence - right.sequence)
@@ -1066,9 +1063,11 @@ export class MemoryStore implements GabotStore {
     type: string;
   }): Promise<SequencedRunEventRecord> {
     const sequence =
-      this.runEvents.filter((row) => row.runId === input.runId).reduce((max, row) => {
-        return Math.max(max, row.sequence);
-      }, 0) + 1;
+      this.runEvents
+        .filter((row) => row.runId === input.runId)
+        .reduce((max, row) => {
+          return Math.max(max, row.sequence);
+        }, 0) + 1;
     const event: SequencedRunEventRecord = {
       runId: input.runId,
       sequence,
