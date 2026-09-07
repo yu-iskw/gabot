@@ -37,6 +37,7 @@ export {
   CREATE_BOT_TOOL,
   CREATE_ROUTINE,
   CREATE_ROUTINE_TOOL,
+  buildDelegateToBotTool,
   DELEGATE_TO_BOT,
   DELEGATE_TO_BOT_TOOL,
   GITHUB_CREATE_ISSUE,
@@ -91,6 +92,7 @@ export type {
   DelegationBudget,
 } from './authority.js';
 export {
+  allocateBotId,
   botIdentityContent,
   parseBotIdentityContent,
   DEFAULT_CHANNEL_NAME,
@@ -104,11 +106,13 @@ export {
   personalProjectId,
   personalWorkspaceId,
   PLATFORM_ORG_ID,
+  slugifyBotId,
   TEAM_BOT_PROFILES,
   workspaceDefaultChannelId,
   workspaceProjectId,
 } from './tenancy.js';
-export type { SeedParticipant, TeamBotProfile } from './tenancy.js';
+export type { IdentityTeammate, SeedParticipant, TeamBotProfile } from './tenancy.js';
+export type { DelegateToBotTool } from './tool-catalog.js';
 export {
   MEMBERSHIP_STATUSES,
   membershipCoversWorkspace,
@@ -187,6 +191,45 @@ export {
 } from './policy-algebra.js';
 export type { CatalogInvocationFlags, CatalogStage } from './catalog-stage.js';
 export { CATALOG_STAGES, invocationAuthorized } from './catalog-stage.js';
+export type {
+  A2AAgentDeclaration,
+  BotTeamMember,
+  BotTeamTemplateDeclaration,
+  BotTemplateDeclaration,
+  CapabilityRequirement,
+  CatalogEntryIdentity,
+  CatalogEntryType,
+  InstallChecklist,
+  InstallChecklistItem,
+  McpServerDeclaration,
+  PublisherKind,
+  SkillDeclaration,
+} from './catalog-templates.js';
+export {
+  assertNoSecretsInDeclaration,
+  buildInstallChecklist,
+  CATALOG_ENTRY_TYPES,
+  CATALOG_SLUG_RE,
+  CATALOG_UUID_RE,
+  FORBIDDEN_SECRET_KEYS,
+  isCatalogSlug,
+  isCatalogUuid,
+  looksLikeGabotSkillRowId,
+  mcpToolWireName,
+  newCatalogId,
+  parseA2AAgentDeclaration,
+  parseBotTeamTemplateDeclaration,
+  parseBotTemplateDeclaration,
+  parseCapabilityRequirement,
+  parseCatalogEntryIdentity,
+  parseCatalogEntryType,
+  parseCatalogSlug,
+  parseCatalogUuid,
+  parseMcpServerDeclaration,
+  parsePublisherKind,
+  parseSkillDeclaration,
+  PUBLISHER_KINDS,
+} from './catalog-templates.js';
 export type {
   AudienceKind,
   ExecutionPrincipal,

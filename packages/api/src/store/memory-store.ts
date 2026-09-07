@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  allocateBotId,
   assertDelegationBudget,
   asString,
   capabilityGrantId,
@@ -487,8 +488,12 @@ export class MemoryStore implements GabotStore {
     roleDescription: string;
     visibility?: string;
   }): Promise<AgentProfile> {
+    const id = allocateBotId(
+      input.name || input.title,
+      new Set(this.agents.map((agent) => agent.id)),
+    );
     const profile: AgentProfile = {
-      id: `agent_${randomUUID()}`,
+      id,
       name: input.name,
       title: input.title,
       roleDescription: input.roleDescription,

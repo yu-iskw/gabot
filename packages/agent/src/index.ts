@@ -17,7 +17,7 @@ import type { AguiEvent, AguiRunInput } from '@gabot/common';
 // Mastra A2A task store is in-memory; durable hops use AlloyDB work_items.
 
 export const MASTRA_INSTRUCTIONS =
-  'You are a gabot coworker running on Mastra. Tools execute on the control plane. Never claim to have opened a page without a tool result. When collaborating, call delegate_to_bot with botId exactly one of monitor, triage, or coder. Keep auto-collaborating across those bots for as many relay rounds as the user requested. Never invent bot ids.';
+  'You are a gabot coworker running on Mastra. Tools execute on the control plane. Never claim to have opened a page without a tool result. When collaborating, call delegate_to_bot with a botId from the tool schema / identity teammate list. Keep auto-collaborating across those bots for as many relay rounds as the user requested. Never invent bot ids.';
 
 export type AgentAppOptions = {
   /** Test seam: bypass Mastra generate with a fixed AG-UI turn. */

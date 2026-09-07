@@ -11,6 +11,8 @@ describe('mastra agent', () => {
     const card: unknown = await response.json();
     expect(isA2AAgentCard(card)).toBe(true);
     expect(MASTRA_INSTRUCTIONS).toContain('Mastra');
+    expect(MASTRA_INSTRUCTIONS).toContain('tool schema / identity teammate list');
+    expect(MASTRA_INSTRUCTIONS).not.toMatch(/exactly one of monitor/);
   });
 
   it('streams AG-UI from a Mastra completeTurn seam', async () => {

@@ -449,7 +449,8 @@ describe('control plane', () => {
     });
     expect(result.toolNames).toContain('create_bot');
     const agents = await store.listAgents();
-    expect(agents.some((agent) => agent.name === 'Research')).toBe(true);
+    const research = agents.find((agent) => agent.name === 'Research');
+    expect(research?.id).toBe('research');
     const app = appWith(store);
     const headers = { authorization: `Bearer ${goodToken}`, 'content-type': 'application/json' };
     const listed = await app.request('/api/agents', { headers });
@@ -460,6 +461,67 @@ describe('control plane', () => {
       body: JSON.stringify({ name: 'Ops', title: 'Ops', roleDescription: 'Ops bot' }),
     });
     expect(created.status).toBe(201);
+  });
+
+  it('creates agents with stable kebab ids and collision suffixes', async () => {
+    const store = new MemoryStore();
+    const first = await store.createAgent({
+      name: 'Flight researcher',
+      title: 'Flight researcher',
+      roleDescription: 'Researches flights.',
+    });
+    expect(first.id).toBe('flight-researcher');
+    const second = await store.createAgent({
+      name: 'Flight researcher',
+      title: 'Flight researcher',
+      roleDescription: 'Another flight researcher.',
+    });
+    expect(second.id).toBe('flight-researcher-2');
+  });
+
+  it('delegates to a custom channel participant bot', async () => {
+    const store = new MemoryStore();
+    await store.upsertUser(person, admins);
+    const custom = await store.createAgent({
+      name: 'Flight researcher',
+      title: 'Flight researcher',
+      roleDescription: 'Researches flights.',
+    });
+    expect(custom.id).toBe('flight-researcher');
+    await store.addChannelParticipant({
+      channelId: defaultChannel,
+      principalType: 'bot',
+      principalId: custom.id,
+      role: 'bot',
+    });
+    const workspace = await store.getWorkspaceForUser(person.id);
+    const run = await store.createRun({
+      workspaceId: workspace?.id ?? '',
+      projectId: workspace?.projectId ?? '',
+      channelId: defaultChannel,
+      botId: 'monitor',
+      ownerUserId: person.id,
+      triggerType: 'interactive',
+      status: 'running',
+      objective: 'research flights',
+      authority: rootAuthority(['delegate_to_bot']),
+      depth: 0,
+    });
+    const result = await runGatewayAction({
+      store,
+      mcpUrl: 'http://mcp.test',
+      actorId: person.id,
+      botId: 'monitor',
+      toolName: 'delegate_to_bot',
+      args: { botId: custom.id, objective: 'Find flights to SFO' },
+      channelId: defaultChannel,
+      run,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('flight-researcher');
+    const hops = await store.listDelegationsForParent(run.id);
+    expect(hops).toHaveLength(1);
+    expect(hops[0]?.toBotId).toBe('flight-researcher');
   });
 
   it('schedules a routine from a bot turn', async () => {

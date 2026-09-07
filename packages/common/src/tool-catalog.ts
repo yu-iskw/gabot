@@ -81,16 +81,42 @@ export const UPDATE_ROUTINE_TOOL = {
   },
 } as const;
 
-export const DELEGATE_TO_BOT_TOOL = {
+export type DelegateToBotTool = {
+  name: typeof DELEGATE_TO_BOT;
+  description: string;
+  parameters: {
+    type: 'object';
+    properties: {
+      botId: {
+        type: 'string';
+        description: string;
+        enum?: string[];
+      };
+      objective: {
+        type: 'string';
+        description: string;
+      };
+      requestedCapabilities: {
+        type: 'array';
+        items: { type: 'string' };
+        description: string;
+      };
+    };
+    required: ['botId', 'objective'];
+  };
+};
+
+/** Empty-roster / static fallback — no closed team allowlist. */
+export const DELEGATE_TO_BOT_TOOL: DelegateToBotTool = {
   name: DELEGATE_TO_BOT,
   description:
-    'Delegate work to another bot in this channel as a durable child Run. botId MUST be one of: monitor, triage, coder, general-assistant. Never invent bot ids.',
+    'Delegate work to another bot in this channel as a durable child Run. botId MUST be an exact channel participant bot id from the current roster. Never invent bot ids.',
   parameters: {
     type: 'object',
     properties: {
       botId: {
         type: 'string',
-        description: 'Exact participant bot id: monitor | triage | coder | general-assistant',
+        description: 'Exact channel participant bot id from the current roster',
       },
       objective: {
         type: 'string',
@@ -105,7 +131,48 @@ export const DELEGATE_TO_BOT_TOOL = {
     },
     required: ['botId', 'objective'],
   },
-} as const;
+};
+
+/**
+ * Build a roster-aware delegate_to_bot tool. When botIds is non-empty, constrains
+ * botId via JSON Schema enum (AG-UI client tools / RunAgentInput.tools).
+ */
+export function buildDelegateToBotTool(botIds: readonly string[]): DelegateToBotTool {
+  const ids = [...new Set(botIds.filter((id) => id.length > 0))];
+  if (ids.length === 0) {
+    return {
+      ...DELEGATE_TO_BOT_TOOL,
+      description:
+        'Delegate work to another bot in this channel as a durable child Run. There are currently no bot participants to delegate to.',
+    };
+  }
+  const listed = ids.join(', ');
+  return {
+    name: DELEGATE_TO_BOT,
+    description: `Delegate work to another bot in this channel as a durable child Run. botId MUST be exactly one of: ${listed}. Never invent bot ids.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        botId: {
+          type: 'string',
+          description: `Exact participant bot id: ${listed}`,
+          enum: ids,
+        },
+        objective: {
+          type: 'string',
+          description:
+            'What the child run should accomplish. For long collaboration relays, include "relay round N of M".',
+        },
+        requestedCapabilities: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tool names the child may use; must be a subset of this run authority',
+        },
+      },
+      required: ['botId', 'objective'],
+    },
+  };
+}
 
 export const GITHUB_CREATE_ISSUE_TOOL = {
   name: GITHUB_CREATE_ISSUE,

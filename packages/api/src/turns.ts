@@ -3,11 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { HttpAgent } from '@ag-ui/client';
 import {
   botIdentityContent,
+  buildDelegateToBotTool,
   collectAguiObservable,
   collectText,
   collectToolCalls,
   configuredModelStepsPerRun,
   decideScriptedTurn,
+  DELEGATE_TO_BOT,
   membershipCoversWorkspace,
   mentionedBotId,
   rootAuthority,
@@ -16,6 +18,8 @@ import {
   TURN_TOOL_NAMES,
   TURN_TOOLS,
 } from '@gabot/common';
+
+import type { IdentityTeammate } from '@gabot/common';
 
 import { runGatewayAction } from './gateway.js';
 import { PROTECTED_AGENT_ID } from './store/types.js';
@@ -101,11 +105,50 @@ export type TurnResult = {
   toolNames: string[];
 };
 
-const OFFERED_TOOLS = TURN_TOOLS.map((tool) => ({
-  name: tool.name,
-  description: tool.description,
-  parameters: { ...tool.parameters },
-}));
+type OfferedTool = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+async function channelBotRoster(
+  store: GabotStore,
+  channelId: string,
+): Promise<{ botIds: string[]; teammates: IdentityTeammate[] }> {
+  const participants = await store.listChannelParticipants(channelId);
+  const botIds = participants
+    .filter((row) => row.principalType === 'bot')
+    .map((row) => row.principalId);
+  const agents = await store.listAgents();
+  const byId = new Map(agents.map((agent) => [agent.id, agent]));
+  const teammates: IdentityTeammate[] = botIds.map((id) => {
+    const agent = byId.get(id);
+    return {
+      id,
+      title: agent?.title ?? agent?.name,
+      roleDescription: agent?.roleDescription,
+    };
+  });
+  return { botIds, teammates };
+}
+
+function offeredToolsForRoster(botIds: readonly string[]): OfferedTool[] {
+  const delegate = buildDelegateToBotTool(botIds);
+  return TURN_TOOLS.map((tool) => {
+    if (tool.name === DELEGATE_TO_BOT) {
+      return {
+        name: delegate.name,
+        description: delegate.description,
+        parameters: { ...delegate.parameters },
+      };
+    }
+    return {
+      name: tool.name,
+      description: tool.description,
+      parameters: { ...tool.parameters },
+    };
+  });
+}
 
 class TurnClientError extends Error {
   public constructor(message: string) {
@@ -234,9 +277,11 @@ async function settleFailedRun(input: HeldTurn, run: RunRecord, error: unknown):
 }
 
 async function completeRun(input: HeldTurn, run: RunRecord): Promise<TurnResult> {
+  const roster = await channelBotRoster(input.store, run.channelId);
+  const tools = offeredToolsForRoster(roster.botIds);
   const [threadId, seeded] = await Promise.all([
     input.store.mintThread(run.ownerUserId, run.channelId),
-    messagesForRun(input.store, run),
+    messagesForRun(input.store, run, roster.teammates),
   ]);
   const toolNames: string[] = [];
   let text = '';
@@ -247,7 +292,7 @@ async function completeRun(input: HeldTurn, run: RunRecord): Promise<TurnResult>
       threadId,
       runId: run.id,
       messages: current,
-      tools: OFFERED_TOOLS,
+      tools,
       botId: run.botId,
     });
     const calls = collectToolCalls(events);
@@ -297,8 +342,12 @@ async function assertHeld(input: HeldTurn, run: RunRecord): Promise<void> {
 async function messagesForRun(
   store: GabotStore,
   run: RunRecord,
+  teammates: readonly IdentityTeammate[],
 ): Promise<AguiRunInput['messages']> {
-  const identity = { role: 'system' as const, content: botIdentityContent(run.botId) };
+  const identity = {
+    role: 'system' as const,
+    content: botIdentityContent(run.botId, teammates),
+  };
   if (run.parentRunId) {
     return [identity, { role: 'user', content: run.objective }];
   }

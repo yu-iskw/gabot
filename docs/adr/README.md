@@ -22,3 +22,5 @@ Numbered records for gabot. Start at [0001](0001-record-architecture-decisions.m
 - [0015. Policy layers inherit, deny-empty, and intersect](0015-policy-layers-inherit-deny-intersect.md)
 - [0016. Built-in computer is outside gabot](0016-built-in-computer-out-of-product-scope.md)
 - [0017. Clean-bootstrap the enterprise schema; PR #1 is reference](0017-clean-bootstrap-prototype-is-reference.md)
+- [0018. Catalog templates, marketplaces, and dual identity](0018-catalog-templates-dual-identity.md)
+  (schema sketch: [0018-catalog-bootstrap-sketch.sql](0018-catalog-bootstrap-sketch.sql))

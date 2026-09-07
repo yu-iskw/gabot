@@ -1,4 +1,5 @@
 import {
+  allocateBotId,
   asStringArray,
   DEFAULT_ALLOW_POLICY,
   DEFAULT_CHANNEL_NAME,
@@ -583,7 +584,8 @@ export class PostgresStore implements GabotStore {
     roleDescription: string;
     visibility?: string;
   }): Promise<AgentProfile> {
-    const id = `agent_${crypto.randomUUID()}`;
+    const existing = await this.sql<{ id: string }[]>`SELECT id FROM agents`;
+    const id = allocateBotId(input.name || input.title, new Set(existing.map((row) => row.id)));
     const visibility = input.visibility ?? 'public';
     await this.sql`
       INSERT INTO agents (id, name, type, configuration)

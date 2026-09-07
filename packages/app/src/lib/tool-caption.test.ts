@@ -4,9 +4,9 @@ import { captionForTool } from './tool-caption.js';
 
 describe('captionForTool', () => {
   it('names a created bot without a role prefix', () => {
-    const caption = captionForTool('Created bot Research (agent_1).');
+    const caption = captionForTool('Created bot Research (flight-researcher).');
     expect(caption.label).toBe('Created a bot');
-    expect(captionForTool('Created bot Research (agent_1).').detail).toBe('Research');
+    expect(captionForTool('Created bot Research (flight-researcher).').detail).toBe('Research');
   });
 
   it('names a schedule', () => {

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  allocateBotId,
   botIdentityContent,
   defaultChannelParticipants,
   mentionedBotId,
   parseBotIdentityContent,
   personalChannelId,
+  slugifyBotId,
   workspaceDefaultChannelId,
   workspaceProjectId,
   workspaceSlug,
@@ -19,6 +21,33 @@ describe('mentionedBotId', () => {
   it('ignores mentions that are not at the start', () => {
     expect(mentionedBotId('please ask @monitor')).toBeUndefined();
     expect(mentionedBotId('hello')).toBeUndefined();
+  });
+
+  it('reads kebab custom bot mentions', () => {
+    expect(mentionedBotId('@flight-researcher research flights')).toBe('flight-researcher');
+  });
+});
+
+describe('slugifyBotId', () => {
+  it('kebab-cases display names', () => {
+    expect(slugifyBotId('Flight researcher')).toBe('flight-researcher');
+    expect(slugifyBotId('  General Assistant  ')).toBe('general-assistant');
+  });
+
+  it('falls back when empty', () => {
+    expect(slugifyBotId('')).toBe('bot');
+    expect(slugifyBotId('!!!')).toBe('bot');
+  });
+});
+
+describe('allocateBotId', () => {
+  it('returns the base slug when free', () => {
+    expect(allocateBotId('Flight researcher', new Set())).toBe('flight-researcher');
+  });
+
+  it('appends -2, -3 on collision', () => {
+    const taken = new Set(['flight-researcher', 'flight-researcher-2']);
+    expect(allocateBotId('Flight researcher', taken)).toBe('flight-researcher-3');
   });
 });
 
@@ -61,6 +90,21 @@ describe('parseBotIdentityContent', () => {
     expect(parseBotIdentityContent(botIdentityContent('general-assistant'))).toBe(
       'general-assistant',
     );
+  });
+
+  it('reads custom teammates and role from roster', () => {
+    const content = botIdentityContent('flight-researcher', [
+      {
+        id: 'flight-researcher',
+        title: 'Flight researcher',
+        roleDescription: 'Researches flights.',
+      },
+      { id: 'monitor', title: 'Monitor' },
+    ]);
+    expect(parseBotIdentityContent(content)).toBe('flight-researcher');
+    expect(content).toContain('@flight-researcher (Flight researcher)');
+    expect(content).toContain('@monitor (Monitor)');
+    expect(content).toContain('Role: Researches flights.');
   });
 
   it('ignores other system text', () => {

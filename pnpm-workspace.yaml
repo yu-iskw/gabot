@@ -7,7 +7,7 @@ packages:
 allowBuilds:
   '@firebase/util': true
   '@playwright/browser-chromium': true
-  '@scarf/scarf': set this to true or false
+  '@scarf/scarf': false
   esbuild: true
   playwright: true
   protobufjs: true

@@ -6,8 +6,8 @@ describe('visibleMessages', () => {
   it('hides an assistant line that only restates the previous tool', () => {
     const shown = visibleMessages([
       { id: '1', role: 'user', content: 'please create a bot named Research' },
-      { id: '2', role: 'tool', content: 'Created bot Research (agent_1).' },
-      { id: '3', role: 'assistant', content: 'Created bot Research (agent_1).' },
+      { id: '2', role: 'tool', content: 'Created bot Research (flight-researcher).' },
+      { id: '3', role: 'assistant', content: 'Created bot Research (flight-researcher).' },
     ]);
     expect(shown.map((row) => row.role)).toEqual(['user', 'tool']);
   });
