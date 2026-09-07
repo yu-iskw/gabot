@@ -3,7 +3,6 @@ import {
   CAPABILITY_GITHUB_ISSUES_CREATE,
   CAPABILITY_MCP_ECHO,
   createScriptedPeopleAuth,
-  DEFAULT_ALLOW_POLICY,
   DEFAULT_WORKSPACE_ID,
   GITHUB_ALLOWED_REPO,
   GITHUB_CREATE_ISSUE,
@@ -19,8 +18,6 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 
 import { createApiApp } from './app.js';
-import { SCHEMA_SQL } from './db/schema-sql.js';
-import * as schema from './db/schema.js';
 import { runGatewayAction } from './gateway.js';
 import { MemoryStore } from './store/memory-store.js';
 import { RUN_EXECUTE_KIND, RUN_LEASE_LOST } from './store/types.js';
@@ -94,46 +91,6 @@ async function ownerRun(store: MemoryStore, ownerUserId = person.id) {
   });
   return { run, workspace };
 }
-
-describe('schema sql', () => {
-  it('creates vector extension before mastra tables', () => {
-    const extension = SCHEMA_SQL.indexOf('CREATE EXTENSION IF NOT EXISTS vector');
-    const mastra = SCHEMA_SQL.indexOf('mastra_threads');
-    expect(extension).toBeGreaterThanOrEqual(0);
-    expect(mastra).toBeGreaterThan(extension);
-    expect(schema.users).toBeDefined();
-    expect(schema.actionPolicy).toBeDefined();
-    expect(schema.workspaces).toBeDefined();
-    expect(schema.connections).toBeDefined();
-    expect(schema.capabilityGrants).toBeDefined();
-    expect(schema.channelPolicies).toBeDefined();
-    expect(schema.organizationMembers).toBeDefined();
-    expect(schema.workspaceMembers).toBeDefined();
-    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS runs');
-    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS connections');
-    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS capability_grants');
-    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS channel_policies');
-    expect(SCHEMA_SQL).toContain('users_identity_uidx');
-    expect(SCHEMA_SQL).toContain('DROP INDEX IF EXISTS workspaces_owner_user_id_uidx');
-    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS workspace_members');
-    expect(SCHEMA_SQL).not.toContain(
-      'CREATE UNIQUE INDEX IF NOT EXISTS workspaces_owner_user_id_uidx',
-    );
-    expect(SCHEMA_SQL).toContain('channels_project_id_fkey');
-    expect(SCHEMA_SQL).toContain(
-      'INSERT INTO connections (id, workspace_id, owner_user_id, provider, credential_ref, status)',
-    );
-    expect(SCHEMA_SQL).toContain('CREATE TABLE IF NOT EXISTS organization_members');
-    expect(SCHEMA_SQL).toContain("WHERE channel_id = 'general'");
-    expect(SCHEMA_SQL).toContain('FROM channel_memberships');
-    expect(SCHEMA_SQL).toContain("cp.principal_type = 'user'");
-    expect(DEFAULT_ALLOW_POLICY.allow).toEqual(['true']);
-    const membership = SCHEMA_SQL.indexOf('CREATE TABLE IF NOT EXISTS workspace_members');
-    const retarget = SCHEMA_SQL.indexOf('UPDATE routines');
-    expect(membership).toBeGreaterThanOrEqual(0);
-    expect(retarget).toBeGreaterThan(membership);
-  });
-});
 
 describe('control plane', () => {
   it('refuses missing bearer tokens', async () => {
@@ -217,6 +174,35 @@ describe('control plane', () => {
       headers: { authorization: `Bearer ${foreign}` },
     });
     expect(response.status).toBe(401);
+  });
+
+  it('rejects a valid token when the principal is not an active member', async () => {
+    const store = new MemoryStore();
+    const app = appWith(store);
+    await store.upsertUser(person, admins);
+    const stranger = verifiedPerson('user-9', 'stranger@example.com', 'Stranger');
+    const strangerToken = peopleAuth.mintIdToken({
+      subject: stranger.id,
+      email: stranger.email,
+      name: stranger.name,
+    });
+    const unknown = await app.request('/api/me', {
+      headers: { authorization: `Bearer ${strangerToken}` },
+    });
+    expect(unknown.status).toBe(403);
+    expect(await unknown.json()).toEqual({ error: 'not_a_member' });
+    expect(await store.getUserByIdentity(stranger.identity)).toBeNull();
+
+    await store.upsertUser(stranger, []);
+    const known = await app.request('/api/me', {
+      headers: { authorization: `Bearer ${strangerToken}` },
+    });
+    expect(known.status).toBe(403);
+    await store.upsertMembership({ userId: stranger.id, role: 'member', status: 'revoked' });
+    const revoked = await app.request('/api/me', {
+      headers: { authorization: `Bearer ${strangerToken}` },
+    });
+    expect(revoked.status).toBe(403);
   });
 
   it('reads and writes action policy on the admin route', async () => {
@@ -1801,13 +1787,12 @@ describe('workspace roles and revocation', () => {
     const { store, app, other, memberHeaders } = await memberApp();
     await store.upsertMembership({ userId: other.id, role: 'member', status: 'revoked' });
     const listed = await app.request('/api/channels', { headers: memberHeaders });
-    expect(listed.status).toBe(200);
-    const body = (await listed.json()) as { channels: Array<{ id: string }> };
-    expect(body.channels.some((row) => row.id === defaultChannel)).toBe(false);
+    expect(listed.status).toBe(403);
+    expect(await listed.json()).toEqual({ error: 'not_a_member' });
     const messages = await app.request(`/api/channels/${defaultChannel}/messages`, {
       headers: memberHeaders,
     });
-    expect(messages.status).toBe(404);
+    expect(messages.status).toBe(403);
   });
 
   it('rejects membership writes that would leave zero active admins', async () => {
@@ -1918,8 +1903,8 @@ describe('workspace roles and revocation', () => {
       name: twin.name,
     });
     const headers = { authorization: `Bearer ${token}` };
-    expect((await app.request('/api/admin/people', { headers })).status).toBe(404);
-    expect((await app.request('/api/admin/action-policy', { headers })).status).toBe(404);
+    expect((await app.request('/api/admin/people', { headers })).status).toBe(403);
+    expect((await app.request('/api/admin/action-policy', { headers })).status).toBe(403);
   });
 
   it('hides a foreign channel id with 404', async () => {

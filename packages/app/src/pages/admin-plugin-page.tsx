@@ -11,6 +11,8 @@ import {
 import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
 import { useSession } from '../lib/session-context.js';
+import { useWorkspaceDirectory } from '../lib/workspace-directory-context.js';
+import { useWorkspaceHref } from '../lib/workspace-href.js';
 
 type PluginDetail = {
   plugin: { id: string; title: string; url: string; vendor: string };
@@ -23,6 +25,8 @@ type PluginDetail = {
 };
 
 export function AdminPluginPage({ pluginId }: { pluginId: string }) {
+  const pluginsHome = useWorkspaceHref('/admin/plugins');
+  const { slug } = useWorkspaceDirectory();
   const { token } = useAuth();
   const { queryKey } = useSession();
   const detail = useQuery({
@@ -35,7 +39,7 @@ export function AdminPluginPage({ pluginId }: { pluginId: string }) {
 
   return (
     <PageShell
-      backButton={{ label: 'Plugins', to: '/admin/plugins' }}
+      backButton={{ label: 'Plugins', to: pluginsHome }}
       title={plugin?.title ?? 'Plugin'}
       description={
         plugin
@@ -55,7 +59,7 @@ export function AdminPluginPage({ pluginId }: { pluginId: string }) {
               <div key={tool.ref}>
                 {index > 0 ? <Separator /> : null}
                 <ItemRow
-                  to={`/admin/plugins/${pluginId}/tools/${tool.name}`}
+                  to={`/workspaces/${slug}/admin/plugins/${pluginId}/tools/${tool.name}`}
                   title={tool.name}
                   description={tool.description}
                   summary={tool.granted ? 'Granted' : 'Not granted'}

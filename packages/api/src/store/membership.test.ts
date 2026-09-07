@@ -20,6 +20,9 @@ describe('workspace membership store', () => {
     expect(await store.getWorkspaceForUser(other.id)).toBeNull();
     await store.upsertUser(admin, [admin.identity]);
     expect((await store.getWorkspaceForUser(admin.id))?.id).toBe('ws-gabot');
+    expect((await store.getUserByIdentity(admin.identity))?.id).toBe(admin.id);
+    expect((await store.getUserByIdentity(other.identity))?.id).toBe(other.id);
+    expect(await store.getUserByIdentity({ issuer, subject: 'missing' })).toBeNull();
     await store.upsertMembership({ userId: other.id, role: 'member', status: 'active' });
     expect((await store.getWorkspaceForUser(other.id))?.id).toBe('ws-gabot');
   });

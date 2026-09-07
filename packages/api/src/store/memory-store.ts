@@ -164,6 +164,13 @@ export class MemoryStore implements GabotStore {
     return user;
   }
 
+  public async getUserByIdentity(identity: IdentityKey): Promise<SessionUser | null> {
+    const existing = [...this.users.values()].find((row) =>
+      identityKeyEquals(row.identity, identity),
+    );
+    return existing ? { ...existing } : null;
+  }
+
   public async getMembership(userId: string): Promise<WorkspaceMembership | null> {
     const row = this.memberships.get(userId);
     return row ? { ...row } : null;
@@ -232,12 +239,15 @@ export class MemoryStore implements GabotStore {
   }
 
   public async getChannel(channelId: string, userId: string): Promise<ChannelRecord | null> {
+    const channel = this.findChannelRow(channelId);
+    if (!channel || channel.deletedAt !== null) {
+      return null;
+    }
     const allowed = this.participants.some(
       (row) =>
-        row.channelId === channelId && row.principalType === 'user' && row.principalId === userId,
+        row.channelId === channel.id && row.principalType === 'user' && row.principalId === userId,
     );
-    const channel = this.channels.get(channelId);
-    if (!allowed || !channel || channel.deletedAt !== null) {
+    if (!allowed) {
       return null;
     }
     return toChannelRecord(channel);
@@ -247,7 +257,7 @@ export class MemoryStore implements GabotStore {
     channelId: string,
     patch: ChannelPatch,
   ): Promise<ChannelRecord | null> {
-    const channel = this.channels.get(channelId);
+    const channel = this.findChannelRow(channelId);
     if (!channel || channel.deletedAt !== null) {
       return null;
     }
@@ -258,13 +268,13 @@ export class MemoryStore implements GabotStore {
   }
 
   public async archiveChannel(channelId: string): Promise<boolean> {
-    const channel = this.channels.get(channelId);
+    const channel = this.findChannelRow(channelId);
     if (!channel || channel.deletedAt !== null) {
       return false;
     }
     channel.deletedAt = new Date();
     for (const routine of this.routines) {
-      if (routine.channelId === channelId) {
+      if (routine.channelId === channel.id) {
         routine.enabled = false;
       }
     }
@@ -558,6 +568,7 @@ export class MemoryStore implements GabotStore {
     }
     const channel: ChannelRow = {
       id: `channel_${randomUUID()}`,
+      publicId: randomUUID(),
       name: input.name,
       description: input.description ?? '',
       lastMessage: null,
@@ -570,7 +581,7 @@ export class MemoryStore implements GabotStore {
   }
 
   public async getChannelScope(channelId: string): Promise<ChannelScope | null> {
-    const channel = this.channels.get(channelId);
+    const channel = this.findChannelRow(channelId);
     if (!channel) {
       return null;
     }
@@ -1201,6 +1212,7 @@ export class MemoryStore implements GabotStore {
     if (!this.channels.has(channelId)) {
       this.channels.set(channelId, {
         id: channelId,
+        publicId: randomUUID(),
         name: DEFAULT_CHANNEL_NAME,
         description: 'Default coworker channel',
         lastMessage: null,
@@ -1230,6 +1242,10 @@ export class MemoryStore implements GabotStore {
         this.capabilityGrants.push({ ...grant });
       }
     }
+  }
+
+  private findChannelRow(channelId: string): ChannelRow | undefined {
+    return findChannelInMap(this.channels, channelId);
   }
 
   private attachChannelParties(channelId: string, userId: string, extraBotId?: string): void {
@@ -1293,11 +1309,28 @@ function heldByOther(row: WorkRow | undefined, executorId: string, now: Date): b
 function toChannelRecord(channel: ChannelRow): ChannelRecord {
   return {
     id: channel.id,
+    publicId: channel.publicId,
     name: channel.name,
     description: channel.description,
     lastMessage: channel.lastMessage,
     projectId: channel.projectId,
   };
+}
+
+function findChannelInMap(
+  channels: Map<string, ChannelRow>,
+  channelId: string,
+): ChannelRow | undefined {
+  const byId = channels.get(channelId);
+  if (byId) {
+    return byId;
+  }
+  for (const row of channels.values()) {
+    if (row.publicId === channelId) {
+      return row;
+    }
+  }
+  return undefined;
 }
 
 function cloneRun(row: RunRecord): RunRecord {

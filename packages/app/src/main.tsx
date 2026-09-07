@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import {
   createRootRoute,
   createRoute,
@@ -10,8 +10,10 @@ import {
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { apiJson } from './api.js';
 import { ChannelPage } from './channel-page.js';
 import { AppSidebar } from './components/app-sidebar.js';
+import { setActiveWorkspaceSlug } from './lib/active-workspace-slug.js';
 import { AuthProvider, useAuth } from './lib/auth-context.js';
 import {
   paneFromSearch,
@@ -23,6 +25,9 @@ import { readRouteString } from './lib/route-param.js';
 import { SessionProvider } from './lib/session-context.js';
 import { SidebarProvider } from './lib/sidebar-context.js';
 import { applyDarkTheme, parseStoredDarkTheme, THEME_STORAGE_KEY } from './lib/theme.js';
+import { WorkspaceDirectoryProvider } from './lib/workspace-directory-context.js';
+import { defaultWorkspaceEntry, fetchWorkspaceDirectory } from './lib/workspace-directory.js';
+import { LocatorPage } from './locator-page.js';
 import { SignPage } from './login-page.js';
 import { AdminAuditPage } from './pages/admin-audit-page.js';
 import { AdminBoundariesPage } from './pages/admin-boundaries-page.js';
@@ -54,11 +59,17 @@ function RootScreen() {
 }
 
 function SignScreen() {
-  const { auth, user } = useAuth();
-  if (user) {
-    return <Navigate to="/" />;
+  const { auth, directory, entry, user } = useAuth();
+  if (user && entry) {
+    return <Navigate to="/workspaces/$workspaceSlug" params={{ workspaceSlug: entry.slug }} />;
   }
-  return <SignPage auth={auth} />;
+  if (!directory) {
+    return <p className="p-6 text-sm text-muted-foreground">Could not load workspaces</p>;
+  }
+  if (!entry || !auth) {
+    return <LocatorPage />;
+  }
+  return <SignPage auth={auth} entry={entry} />;
 }
 
 function AuthedScreen() {
@@ -66,27 +77,41 @@ function AuthedScreen() {
   if (!user) {
     return <Navigate to="/sign" />;
   }
+  return <Outlet />;
+}
+
+function WorkspaceHomeRedirect() {
+  const { directory, entry } = useAuth();
+  const slug = entry?.slug ?? (directory ? defaultWorkspaceEntry(directory).slug : 'gabot');
+  return <Navigate to="/workspaces/$workspaceSlug" params={{ workspaceSlug: slug }} />;
+}
+
+function WorkspaceShell() {
+  const params: unknown = workspaceRoute.useParams();
+  const workspaceSlug = readRouteString(params, 'workspaceSlug', 'gabot');
   return (
-    <SessionProvider>
-      <SidebarProvider>
-        <div className="flex h-svh overflow-hidden">
-          <AppSidebar />
-          <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <Outlet />
-          </main>
-        </div>
-      </SidebarProvider>
-    </SessionProvider>
+    <WorkspaceDirectoryProvider slug={workspaceSlug}>
+      <SessionProvider>
+        <SidebarProvider>
+          <div className="flex h-svh overflow-hidden">
+            <AppSidebar />
+            <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <Outlet />
+            </main>
+          </div>
+        </SidebarProvider>
+      </SessionProvider>
+    </WorkspaceDirectoryProvider>
   );
 }
 
 function ChannelScreen() {
-  const params: unknown = channelRoute.useParams();
-  const search = readChannelSearch(searchRecord(channelRoute.useSearch()));
-  const navigate = channelRoute.useNavigate();
+  const params: unknown = workspaceChannelRoute.useParams();
+  const search = readChannelSearch(searchRecord(workspaceChannelRoute.useSearch()));
+  const navigate = workspaceChannelRoute.useNavigate();
   return (
     <ChannelPage
-      channelId={readRouteString(params, 'channelId', '')}
+      channelId={readRouteString(params, 'channelPublicId', '')}
       pane={paneFromSearch(search)}
       onPane={(next) => {
         void navigate({ search: searchForPane(next) });
@@ -110,6 +135,42 @@ function PluginToolScreen() {
   );
 }
 
+function LegacyChannelRedirect() {
+  const { token } = useAuth();
+  const params: unknown = legacyChannelRoute.useParams();
+  const channelId = readRouteString(params, 'channelId', '');
+  const listing = useQuery({
+    queryKey: ['workspace-directory'],
+    queryFn: fetchWorkspaceDirectory,
+  });
+  const channel = useQuery({
+    enabled: listing.data !== undefined && channelId.length > 0,
+    queryKey: ['legacy-channel', channelId, listing.data?.workspaces[0]?.slug],
+    queryFn: async () => {
+      const slug = defaultWorkspaceEntry(listing.data!).slug;
+      setActiveWorkspaceSlug(slug);
+      const body = await apiJson<{ channels: Array<{ id: string; publicId: string }> }>(
+        '/api/channels',
+        await token(),
+      );
+      return body.channels.find((row) => row.id === channelId || row.publicId === channelId);
+    },
+  });
+  if (!listing.data || channel.isLoading) {
+    return <p className="p-6 text-sm text-muted-foreground">Redirecting…</p>;
+  }
+  const slug = defaultWorkspaceEntry(listing.data).slug;
+  if (!channel.data) {
+    return <Navigate to="/workspaces/$workspaceSlug" params={{ workspaceSlug: slug }} />;
+  }
+  return (
+    <Navigate
+      to="/workspaces/$workspaceSlug/channels/$channelPublicId"
+      params={{ workspaceSlug: slug, channelPublicId: channel.data.publicId }}
+    />
+  );
+}
+
 const rootRoute = createRootRoute({ component: RootScreen });
 const signRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -124,81 +185,96 @@ const authedRoute = createRoute({
 const indexRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/',
+  component: WorkspaceHomeRedirect,
+});
+const legacyChannelRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/channel/$channelId',
+  component: LegacyChannelRedirect,
+});
+const workspaceRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/workspaces/$workspaceSlug',
+  component: WorkspaceShell,
+});
+const workspaceIndexRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: '/',
   component: HomePage,
 });
 const newChannelRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/channel/new',
+  getParentRoute: () => workspaceRoute,
+  path: '/channels/new',
   component: NewChannelPage,
 });
-const channelRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/channel/$channelId',
+const workspaceChannelRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: '/channels/$channelPublicId',
   validateSearch: (search: Record<string, unknown>) => readChannelSearch(search),
   component: ChannelScreen,
 });
 const agentsRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/agents',
   component: AgentsPage,
 });
 const routinesRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/routines',
   component: RoutinesPage,
 });
 const skillsRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/skills',
   component: SkillsPage,
 });
 const adminRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/admin',
   component: AdminPage,
 });
 const adminAuditRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/admin/audit',
   component: AdminAuditPage,
 });
 const adminBoundariesRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/admin/boundaries',
   component: AdminBoundariesPage,
 });
 const adminPluginsRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/admin/plugins',
   component: AdminPluginsPage,
 });
 const adminPluginRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/admin/plugins/$pluginId',
   component: PluginScreen,
 });
 const adminPluginToolRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/admin/plugins/$pluginId/tools/$toolName',
   component: PluginToolScreen,
 });
 const adminPeopleRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/admin/people',
   component: AdminPeoplePage,
 });
 const adminCredentialsRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/admin/credentials',
   component: AdminCredentialsPage,
 });
 const adminIdentityRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/admin/identity-providers',
   component: AdminIdentityPage,
 });
 const settingsRoute = createRoute({
-  getParentRoute: () => authedRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/settings',
   component: SettingsPage,
 });
@@ -207,21 +283,25 @@ const routeTree = rootRoute.addChildren([
   signRoute,
   authedRoute.addChildren([
     indexRoute,
-    newChannelRoute,
-    channelRoute,
-    agentsRoute,
-    routinesRoute,
-    skillsRoute,
-    adminRoute,
-    adminAuditRoute,
-    adminBoundariesRoute,
-    adminPluginsRoute,
-    adminPluginRoute,
-    adminPluginToolRoute,
-    adminPeopleRoute,
-    adminCredentialsRoute,
-    adminIdentityRoute,
-    settingsRoute,
+    legacyChannelRoute,
+    workspaceRoute.addChildren([
+      workspaceIndexRoute,
+      newChannelRoute,
+      workspaceChannelRoute,
+      agentsRoute,
+      routinesRoute,
+      skillsRoute,
+      adminRoute,
+      adminAuditRoute,
+      adminBoundariesRoute,
+      adminPluginsRoute,
+      adminPluginRoute,
+      adminPluginToolRoute,
+      adminPeopleRoute,
+      adminCredentialsRoute,
+      adminIdentityRoute,
+      settingsRoute,
+    ]),
   ]),
 ]);
 

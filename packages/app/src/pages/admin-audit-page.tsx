@@ -5,10 +5,12 @@ import { PageEmpty, PageShell } from '../components/layout/page-shell.js';
 import { readAuditPayload } from '../lib/audit-payload.js';
 import { useAuth } from '../lib/auth-context.js';
 import { useSession } from '../lib/session-context.js';
+import { useWorkspaceHref } from '../lib/workspace-href.js';
 
 type AuditEvent = { eventType: string; payload: unknown };
 
 export function AdminAuditPage() {
+  const adminHome = useWorkspaceHref('/admin');
   const { token } = useAuth();
   const { queryKey } = useSession();
   const audit = useQuery({
@@ -25,7 +27,7 @@ export function AdminAuditPage() {
   return (
     <PageShell
       width="wide"
-      backButton={{ label: 'Admin', to: '/admin' }}
+      backButton={{ label: 'Admin', to: adminHome }}
       title="Audit"
       description="What Bots did, in order."
     >

@@ -5,6 +5,7 @@ import { FactRow, PageEmpty, PageSection, PageShell } from '../components/layout
 import { Switch } from '../components/ui/switch.js';
 import { useAuth } from '../lib/auth-context.js';
 import { useSession } from '../lib/session-context.js';
+import { useWorkspaceHref } from '../lib/workspace-href.js';
 
 type PluginDetail = {
   plugin: { id: string; title: string };
@@ -23,6 +24,7 @@ export function AdminPluginToolPage({
   pluginId: string;
   toolName: string;
 }) {
+  const pluginHome = useWorkspaceHref(`/admin/plugins/${pluginId}`);
   const { token } = useAuth();
   const { queryKey } = useSession();
   const queryClient = useQueryClient();
@@ -48,7 +50,7 @@ export function AdminPluginToolPage({
 
   return (
     <PageShell
-      backButton={{ label: pluginTitle, to: `/admin/plugins/${pluginId}` }}
+      backButton={{ label: pluginTitle, to: pluginHome }}
       title={toolName}
       description={tool?.description || 'This tool came with no description.'}
     >

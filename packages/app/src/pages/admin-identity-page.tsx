@@ -1,9 +1,11 @@
 import { PageEmpty, PageSection, PageShell } from '../components/layout/page-shell.js';
+import { useWorkspaceHref } from '../lib/workspace-href.js';
 
 export function AdminIdentityPage() {
+  const adminHome = useWorkspaceHref('/admin');
   return (
     <PageShell
-      backButton={{ label: 'Admin', to: '/admin' }}
+      backButton={{ label: 'Admin', to: adminHome }}
       title="Identity providers"
       description="A company's own provider is Identity Platform, not a second auth product."
     >

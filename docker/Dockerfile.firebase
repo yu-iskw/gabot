@@ -12,5 +12,6 @@ USER node
 EXPOSE 9099
 HEALTHCHECK --interval=5s --timeout=5s --retries=20 CMD node -e "fetch('http://127.0.0.1:9099').then(()=>process.exit(0),()=>process.exit(1))"
 # Auth emulator must listen on 0.0.0.0:9099. The API uses FIREBASE_AUTH_EMULATOR_HOST=auth:9099;
-# the browser uses localhost:9099 on the published loopback port.
+# the browser uses localhost:9099 on the published loopback port. Dual overlay auth-b
+# overrides --project to demo-gabot-b and publishes 127.0.0.1:9199.
 CMD ["firebase", "emulators:start", "--only", "auth", "--project", "demo-gabot"]

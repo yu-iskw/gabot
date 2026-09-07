@@ -9,33 +9,54 @@
 #
 # Launch:
 #   docker compose -f compose/docker-compose.yml -f compose/vertex.yml up -d --wait
+# Dual backends + Vertex:
+#   pnpm compose:up:dual:vertex
 #
 # Auth: mount host ADC into the node user home (Dockerfile USER node).
+
+x-vertex-agent-env: &vertex-agent-env
+  GABOT_MODEL_PROVIDER: google-vertex
+  GOOGLE_VERTEX_PROJECT: ${GOOGLE_VERTEX_PROJECT:-ubie-yu-sandbox}
+  GOOGLE_CLOUD_PROJECT: ${GOOGLE_VERTEX_PROJECT:-ubie-yu-sandbox}
+  GOOGLE_VERTEX_LOCATION: ${GOOGLE_VERTEX_LOCATION:-global}
+  GABOT_VERTEX_MODEL: ${GABOT_VERTEX_MODEL:-gemini-2.5-flash}
+  GOOGLE_APPLICATION_CREDENTIALS: /home/node/.config/gcloud/application_default_credentials.json
+  # Enough budget for 20+ turn monitor↔triage↔coder relays.
+  GABOT_MAX_DELEGATION_DEPTH: ${GABOT_MAX_DELEGATION_DEPTH:-32}
+  GABOT_MAX_CHILD_RUNS: ${GABOT_MAX_CHILD_RUNS:-24}
+  GABOT_MAX_RUNS_PER_ROOT: ${GABOT_MAX_RUNS_PER_ROOT:-48}
+  GABOT_MODEL_STEPS_PER_RUN: ${GABOT_MODEL_STEPS_PER_RUN:-8}
+
+x-vertex-api-env: &vertex-api-env
+  GABOT_MAX_DELEGATION_DEPTH: ${GABOT_MAX_DELEGATION_DEPTH:-32}
+  GABOT_MAX_CHILD_RUNS: ${GABOT_MAX_CHILD_RUNS:-24}
+  GABOT_MAX_RUNS_PER_ROOT: ${GABOT_MAX_RUNS_PER_ROOT:-48}
+  GABOT_MODEL_STEPS_PER_RUN: ${GABOT_MODEL_STEPS_PER_RUN:-8}
 
 services:
   agent:
     environment:
-      GABOT_MODEL_PROVIDER: google-vertex
-      GOOGLE_VERTEX_PROJECT: ${GOOGLE_VERTEX_PROJECT:-ubie-yu-sandbox}
-      GOOGLE_CLOUD_PROJECT: ${GOOGLE_VERTEX_PROJECT:-ubie-yu-sandbox}
-      GOOGLE_VERTEX_LOCATION: ${GOOGLE_VERTEX_LOCATION:-global}
-      GABOT_VERTEX_MODEL: ${GABOT_VERTEX_MODEL:-gemini-2.5-flash}
-      GOOGLE_APPLICATION_CREDENTIALS: /home/node/.config/gcloud/application_default_credentials.json
-      # Enough budget for 20+ turn monitor↔triage↔coder relays.
-      GABOT_MAX_DELEGATION_DEPTH: ${GABOT_MAX_DELEGATION_DEPTH:-32}
-      GABOT_MAX_CHILD_RUNS: ${GABOT_MAX_CHILD_RUNS:-24}
-      GABOT_MAX_RUNS_PER_ROOT: ${GABOT_MAX_RUNS_PER_ROOT:-48}
-      GABOT_MODEL_STEPS_PER_RUN: ${GABOT_MODEL_STEPS_PER_RUN:-8}
+      <<: *vertex-agent-env
     volumes:
       - ${HOME}/.config/gcloud:/home/node/.config/gcloud:ro
     # Live Vertex; scripted-model is unused but can stay healthy for other services.
     depends_on:
-      migrate:
+      seed:
         condition: service_completed_successfully
 
   api:
     environment:
-      GABOT_MAX_DELEGATION_DEPTH: ${GABOT_MAX_DELEGATION_DEPTH:-32}
-      GABOT_MAX_CHILD_RUNS: ${GABOT_MAX_CHILD_RUNS:-24}
-      GABOT_MAX_RUNS_PER_ROOT: ${GABOT_MAX_RUNS_PER_ROOT:-48}
-      GABOT_MODEL_STEPS_PER_RUN: ${GABOT_MODEL_STEPS_PER_RUN:-8}
+      <<: *vertex-api-env
+
+  agent-b:
+    environment:
+      <<: *vertex-agent-env
+    volumes:
+      - ${HOME}/.config/gcloud:/home/node/.config/gcloud:ro
+    depends_on:
+      seed-b:
+        condition: service_completed_successfully
+
+  api-b:
+    environment:
+      <<: *vertex-api-env

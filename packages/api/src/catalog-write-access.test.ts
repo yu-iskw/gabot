@@ -107,7 +107,7 @@ async function catalogMutations(
 describe('catalog write access', () => {
   it.each([
     { label: 'member', person: memberPerson, status: 403 },
-    { label: 'outsider', person: outsiderPerson, status: 404 },
+    { label: 'outsider', person: outsiderPerson, status: 403 },
   ])('refuses $label catalog writes with $status', async ({ person, status }) => {
     const { app, store, seededAgent, seededSkill } = await catalogFixture();
     const headers = jsonHeaders(person);
@@ -120,12 +120,13 @@ describe('catalog write access', () => {
     expect(await store.getSkill(seededSkill.slug)).not.toBeNull();
   });
 
-  it('still lists agents and skills for members and outsiders', async () => {
+  it('still lists agents and skills for members', async () => {
     const { app } = await catalogFixture();
-    const headersList = [jsonHeaders(memberPerson), jsonHeaders(outsiderPerson)];
-    for (const headers of headersList) {
-      expect((await app.request('/api/agents', { headers })).status).toBe(200);
-      expect((await app.request('/api/skills', { headers })).status).toBe(200);
-    }
+    const headers = jsonHeaders(memberPerson);
+    expect((await app.request('/api/agents', { headers })).status).toBe(200);
+    expect((await app.request('/api/skills', { headers })).status).toBe(200);
+    const outsider = jsonHeaders(outsiderPerson);
+    expect((await app.request('/api/agents', { headers: outsider })).status).toBe(403);
+    expect((await app.request('/api/skills', { headers: outsider })).status).toBe(403);
   });
 });

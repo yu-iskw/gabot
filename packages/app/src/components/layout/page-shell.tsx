@@ -28,7 +28,7 @@ export function PageShell({
         <SidebarToggle />
         {backButton ? (
           <Link
-            to={backButton.to}
+            to={backButton.to as '/'}
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <IconChevronLeft className="size-4" />
@@ -112,7 +112,7 @@ export function ItemRow({
   to: string;
 }) {
   return (
-    <Link to={to} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/60">
+    <Link to={to as '/'} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/60">
       {icon ? <span className="text-muted-foreground">{icon}</span> : null}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-sm font-medium">{title}</span>

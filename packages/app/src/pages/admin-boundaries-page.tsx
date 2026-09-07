@@ -7,10 +7,12 @@ import { Button } from '../components/ui/button.js';
 import { Textarea } from '../components/ui/textarea.js';
 import { useAuth } from '../lib/auth-context.js';
 import { useSession } from '../lib/session-context.js';
+import { useWorkspaceHref } from '../lib/workspace-href.js';
 
 type Policy = { mode: string; deny: string[]; allow: string[] };
 
 export function AdminBoundariesPage() {
+  const adminHome = useWorkspaceHref('/admin');
   const { token } = useAuth();
   const { queryKey } = useSession();
   const queryClient = useQueryClient();
@@ -35,7 +37,7 @@ export function AdminBoundariesPage() {
 
   return (
     <PageShell
-      backButton={{ label: 'Admin', to: '/admin' }}
+      backButton={{ label: 'Admin', to: adminHome }}
       title="Boundaries"
       description="CEL expressions that refuse tool actions. One rule per line."
     >

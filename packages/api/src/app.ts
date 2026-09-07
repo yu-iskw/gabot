@@ -939,7 +939,7 @@ async function requireOwnedChannel(
     return { ok: false, status: 404, body: { error: NOT_FOUND } };
   }
   const [scope, workspace] = await Promise.all([
-    store.getChannelScope(channelId),
+    store.getChannelScope(channel.id),
     store.getWorkspaceForUser(user.id),
   ]);
   if (!scope || !workspace || workspace.id !== scope.workspaceId) {

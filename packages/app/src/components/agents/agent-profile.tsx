@@ -6,6 +6,7 @@ import { apiJson } from '../../api.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { useSession } from '../../lib/session-context.js';
 import { sessionCanManageCatalog } from '../../lib/session-scope.js';
+import { useWorkspaceDirectory } from '../../lib/workspace-directory-context.js';
 import { ChannelAvatar } from '../channels/channel-avatar.js';
 import { Button } from '../ui/button.js';
 import { Input } from '../ui/input.js';
@@ -18,6 +19,7 @@ const PROTECTED_AGENT_ID = 'general-assistant';
 export function AgentProfile({ agentId, onDeleted }: { agentId: string; onDeleted?: () => void }) {
   const { token } = useAuth();
   const { me, queryKey } = useSession();
+  const { slug } = useWorkspaceDirectory();
   const canManageCatalog = sessionCanManageCatalog(me);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -31,15 +33,22 @@ export function AgentProfile({ agentId, onDeleted }: { agentId: string; onDelete
   });
   const start = useMutation({
     mutationFn: async (coworker: Coworker) => {
-      const created = await apiJson<{ channel: { id: string } }>('/api/channels', await token(), {
-        method: 'POST',
-        body: JSON.stringify({ name: coworker.title || coworker.name, agentId: coworker.id }),
-      });
-      return created.channel.id;
+      const created = await apiJson<{ channel: { id: string; publicId: string } }>(
+        '/api/channels',
+        await token(),
+        {
+          method: 'POST',
+          body: JSON.stringify({ name: coworker.title || coworker.name, agentId: coworker.id }),
+        },
+      );
+      return created.channel;
     },
-    onSuccess: async (channelId) => {
+    onSuccess: async (channel) => {
       await queryClient.invalidateQueries({ queryKey: queryKey('channels') });
-      await navigate({ to: '/channel/$channelId', params: { channelId } });
+      await navigate({
+        to: '/workspaces/$workspaceSlug/channels/$channelPublicId',
+        params: { workspaceSlug: slug, channelPublicId: channel.publicId },
+      });
     },
   });
   const save = useMutation({

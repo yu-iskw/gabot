@@ -24,3 +24,6 @@ Numbered records for gabot. Start at [0001](0001-record-architecture-decisions.m
 - [0017. Clean-bootstrap the enterprise schema; PR #1 is reference](0017-clean-bootstrap-prototype-is-reference.md)
 - [0018. Catalog templates, marketplaces, and dual identity](0018-catalog-templates-dual-identity.md)
   (schema sketch: [0018-catalog-bootstrap-sketch.sql](0018-catalog-bootstrap-sketch.sql))
+- [0019. Atlas Community Edition for schema migrations](0019-atlas-community-schema-migrations.md)
+- [0020. Client workspace directory and navigation URLs](0020-client-workspace-directory-and-navigation-urls.md)
+- [0021. Per-backend membership-gated workspace login](0021-per-backend-membership-gated-workspace-login.md)

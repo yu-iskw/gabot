@@ -5,10 +5,12 @@ import { PageEmpty, PageRows, PageSection, PageShell } from '../components/layou
 import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
 import { useSession } from '../lib/session-context.js';
+import { useWorkspaceHref } from '../lib/workspace-href.js';
 
 type Person = { id: string; email: string; name: string; isAdmin: boolean };
 
 export function AdminPeoplePage() {
+  const adminHome = useWorkspaceHref('/admin');
   const { token } = useAuth();
   const { queryKey } = useSession();
   const people = useQuery({
@@ -21,7 +23,7 @@ export function AdminPeoplePage() {
 
   return (
     <PageShell
-      backButton={{ label: 'Admin', to: '/admin' }}
+      backButton={{ label: 'Admin', to: adminHome }}
       title="People"
       description="Everybody who has signed in through Identity Platform."
     >

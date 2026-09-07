@@ -1,0 +1,24 @@
+{
+  "workspaces": [
+    {
+      "slug": "gabot",
+      "displayName": "Gabot",
+      "upstream": "http://127.0.0.1:3001",
+      "backendId": "backend-gabot",
+      "workspaceId": "ws-gabot",
+      "authDomain": "127.0.0.1:9099",
+      "tokenAudience": "demo-gabot",
+      "domain": "gabot.localhost"
+    },
+    {
+      "slug": "gabot-b",
+      "displayName": "Gabot B",
+      "upstream": "http://127.0.0.1:3002",
+      "backendId": "backend-gabot-b",
+      "workspaceId": "ws-gabot-b",
+      "authDomain": "127.0.0.1:9199",
+      "tokenAudience": "demo-gabot-b",
+      "domain": "gabot-b.localhost"
+    }
+  ]
+}

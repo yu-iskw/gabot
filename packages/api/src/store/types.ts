@@ -18,6 +18,7 @@ export type ChannelRecord = {
   lastMessage: string | null;
   name: string;
   projectId: string;
+  publicId: string;
 };
 
 export type ProjectRecord = {
@@ -313,6 +314,7 @@ export const WORKSPACE_NOT_FOUND = 'Workspace not found.';
 
 export type GabotStore = {
   upsertUser(person: VerifiedPerson, adminIdentities: IdentityKey[]): Promise<SessionUser>;
+  getUserByIdentity(identity: IdentityKey): Promise<SessionUser | null>;
   getMembership(userId: string): Promise<WorkspaceMembership | null>;
   listMemberships(): Promise<WorkspaceMembership[]>;
   upsertMembership(input: {

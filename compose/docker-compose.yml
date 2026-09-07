@@ -2,7 +2,15 @@
 #
 # Auth emulator listens 0.0.0.0:9099 inside the container. The API uses
 # FIREBASE_AUTH_EMULATOR_HOST=auth:9099. The browser (and Playwright) use
-# localhost:9099 on the published loopback port.
+# localhost:9099 on the published loopback port. Profile dual adds auth-b on
+# 127.0.0.1:9199 with project demo-gabot-b (ADR 0021).
+#
+# Optional second backend (profile dual): pnpm compose:up:dual
+# or docker compose -f compose/docker-compose.yml --profile dual up -d --wait
+# https://docs.docker.com/compose/how-tos/profiles/
+
+include:
+  - path: dual.yml
 
 services:
   omni:
@@ -28,18 +36,34 @@ services:
       - data
 
   migrate:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.node
-      args:
-        PACKAGE: api
-    working_dir: /app/packages/api
-    command: [node, dist/migrate.js]
-    environment:
-      DATABASE_URL: postgres://gabot:gabot@omni:5432/gabot
+    # Atlas Community Edition (ADR 0019). Pin version; do not use latest.
+    image: arigaio/atlas:1.3.3-community
+    volumes:
+      - ../db/migrations:/migrations:ro
+    command:
+      - migrate
+      - apply
+      - --url
+      - postgres://gabot:gabot@omni:5432/gabot?sslmode=disable
+      - --dir
+      - file://migrations
     depends_on:
       omni:
         condition: service_healthy
+    restart: 'no'
+    networks:
+      - data
+
+  seed:
+    image: pgvector/pgvector:pg17
+    volumes:
+      - ../db/seed:/seed:ro
+    environment:
+      PGPASSWORD: gabot
+    command: [psql, -h, omni, -U, gabot, -d, gabot, -v, ON_ERROR_STOP=1, -f, /seed/dev.sql]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: 'no'
     networks:
       - data
@@ -106,7 +130,7 @@ services:
     depends_on:
       scripted-model:
         condition: service_healthy
-      migrate:
+      seed:
         condition: service_completed_successfully
     healthcheck:
       test: node -e "fetch('http://127.0.0.1:4200/health').then(r=>process.exit(r.ok?0:1))"
@@ -140,7 +164,7 @@ services:
     ports:
       - 127.0.0.1:3001:3001
     depends_on:
-      migrate:
+      seed:
         condition: service_completed_successfully
       auth:
         condition: service_healthy
@@ -169,7 +193,7 @@ services:
       API_INTERNAL_URL: http://api:3001
       WORKER_SHARED_SECRET: gabot-dev-worker-secret
     depends_on:
-      migrate:
+      seed:
         condition: service_completed_successfully
       api:
         condition: service_healthy
@@ -202,7 +226,7 @@ services:
       retries: 15
 
 networks:
-  # Omni, migrate, api, jobs, and the agent (Mastra PostgresStore only).
+  # Omni, migrate, seed, api, jobs, and the agent (Mastra PostgresStore only).
   data:
     driver: bridge
   default:

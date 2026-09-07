@@ -11,6 +11,7 @@ import { useAuth } from '../lib/auth-context.js';
 import { resolveProjectId } from '../lib/resolve-project-id.js';
 import { useSession } from '../lib/session-context.js';
 import { sessionMembershipLabel } from '../lib/session-scope.js';
+import { useWorkspaceDirectory } from '../lib/workspace-directory-context.js';
 
 import type { Coworker } from '../lib/agents.js';
 import type { NamedProject } from '../lib/project-channels.js';
@@ -18,6 +19,7 @@ import type { NamedProject } from '../lib/project-channels.js';
 export function HomePage() {
   const { token } = useAuth();
   const { me, queryKey } = useSession();
+  const { slug } = useWorkspaceDirectory();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [projectId, setProjectId] = useState('');
@@ -55,15 +57,18 @@ export function HomePage() {
         description: description || undefined,
       });
     },
-    onSuccess: async (channelId) => {
+    onSuccess: async (channel) => {
       await queryClient.invalidateQueries({ queryKey: queryKey('channels') });
-      await navigate({ to: '/channel/$channelId', params: { channelId } });
+      await navigate({
+        to: '/workspaces/$workspaceSlug/channels/$channelPublicId',
+        params: { workspaceSlug: slug, channelPublicId: channel.publicId },
+      });
     },
   });
   const start = useMutation({
     mutationFn: async (input: { botId: string | null; message: string }) => {
       const auth = await token();
-      const channelId = await createChannel(auth, {
+      const channel = await createChannel(auth, {
         name: channelNameFrom(input.message),
         agentId: input.botId || undefined,
         projectId: await projectIdForCreate(
@@ -76,16 +81,19 @@ export function HomePage() {
         description: description || undefined,
       });
       await readTurnStream(
-        `/api/channels/${channelId}/turns`,
+        `/api/channels/${channel.id}/turns`,
         await token(),
         input.message,
         input.botId,
       );
-      return channelId;
+      return channel;
     },
-    onSuccess: async (channelId) => {
+    onSuccess: async (channel) => {
       await queryClient.invalidateQueries({ queryKey: queryKey('channels') });
-      await navigate({ to: '/channel/$channelId', params: { channelId } });
+      await navigate({
+        to: '/workspaces/$workspaceSlug/channels/$channelPublicId',
+        params: { workspaceSlug: slug, channelPublicId: channel.publicId },
+      });
     },
   });
 
@@ -198,10 +206,14 @@ async function projectIdForCreate(
 async function createChannel(
   token: string,
   body: { agentId?: string; description?: string; name: string; projectId?: string },
-): Promise<string> {
-  const created = await apiJson<{ channel: { id: string } }>('/api/channels', token, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
-  return created.channel.id;
+): Promise<{ id: string; publicId: string }> {
+  const created = await apiJson<{ channel: { id: string; publicId: string } }>(
+    '/api/channels',
+    token,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+  return created.channel;
 }

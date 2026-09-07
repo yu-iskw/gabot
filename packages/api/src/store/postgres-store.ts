@@ -15,6 +15,7 @@ import {
   slugifyBotId,
   workspaceDefaultChannelId,
   workspaceProjectId,
+  workspaceSlug,
 } from '@gabot/common';
 import postgres from 'postgres';
 
@@ -148,6 +149,34 @@ export class PostgresStore implements GabotStore {
     return session;
   }
 
+  public async getUserByIdentity(identity: IdentityKey): Promise<SessionUser | null> {
+    const tenant = identity.tenant ?? '';
+    const rows = await this.sql<
+      {
+        email: string;
+        id: string;
+        issuer: string;
+        name: string | null;
+        subject: string;
+        tenant: string;
+      }[]
+    >`
+      SELECT id, email, name, issuer, subject, tenant
+      FROM users
+      WHERE issuer = ${identity.issuer}
+        AND tenant = ${tenant}
+        AND subject = ${identity.subject}
+    `;
+    const user = rows.at(0);
+    if (user === undefined) {
+      return null;
+    }
+    const roles = await this.sql<{ role: string }[]>`
+      SELECT role FROM user_roles WHERE user_id = ${user.id} AND role = 'admin'
+    `;
+    return toSessionUser(user, roles.length > 0);
+  }
+
   public async getMembership(userId: string): Promise<WorkspaceMembership | null> {
     const rows = await this.sql<
       { role: string; status: string; user_id: string; workspace_id: string }[]
@@ -219,8 +248,8 @@ export class PostgresStore implements GabotStore {
 
   public async listChannels(userId: string): Promise<ChannelRecord[]> {
     return await this.sql<ChannelRecord[]>`
-      SELECT c.id, c.name, c.description, c.last_message AS "lastMessage",
-             c.project_id AS "projectId"
+      SELECT c.id, c.public_id::text AS "publicId", c.name, c.description,
+             c.last_message AS "lastMessage", c.project_id AS "projectId"
       FROM channels c
       JOIN channel_participants p ON p.channel_id = c.id
       WHERE p.principal_type = 'user' AND p.principal_id = ${userId}
@@ -231,11 +260,12 @@ export class PostgresStore implements GabotStore {
 
   public async getChannel(channelId: string, userId: string): Promise<ChannelRecord | null> {
     const rows = await this.sql<ChannelRecord[]>`
-      SELECT c.id, c.name, c.description, c.last_message AS "lastMessage",
-             c.project_id AS "projectId"
+      SELECT c.id, c.public_id::text AS "publicId", c.name, c.description,
+             c.last_message AS "lastMessage", c.project_id AS "projectId"
       FROM channels c
       JOIN channel_participants p ON p.channel_id = c.id
-      WHERE c.id = ${channelId} AND p.principal_type = 'user' AND p.principal_id = ${userId}
+      WHERE (c.id = ${channelId} OR c.public_id::text = ${channelId})
+        AND p.principal_type = 'user' AND p.principal_id = ${userId}
         AND c.deleted_at IS NULL
     `;
     return rows.at(0) ?? null;
@@ -247,7 +277,8 @@ export class PostgresStore implements GabotStore {
   ): Promise<ChannelRecord | null> {
     if (patch.description === undefined) {
       const rows = await this.sql<ChannelRecord[]>`
-        SELECT id, name, description, last_message AS "lastMessage", project_id AS "projectId"
+        SELECT id, public_id::text AS "publicId", name, description,
+               last_message AS "lastMessage", project_id AS "projectId"
         FROM channels WHERE id = ${channelId} AND deleted_at IS NULL
       `;
       return rows.at(0) ?? null;
@@ -256,7 +287,8 @@ export class PostgresStore implements GabotStore {
       UPDATE channels
       SET description = ${patch.description}, updated_at = now()
       WHERE id = ${channelId} AND deleted_at IS NULL
-      RETURNING id, name, description, last_message AS "lastMessage", project_id AS "projectId"
+      RETURNING id, public_id::text AS "publicId", name, description,
+                last_message AS "lastMessage", project_id AS "projectId"
     `;
     return rows.at(0) ?? null;
   }
@@ -670,14 +702,21 @@ export class PostgresStore implements GabotStore {
     }
     const id = `channel_${crypto.randomUUID()}`;
     const description = input.description ?? '';
-    await this.sql.begin(async (sql) => {
-      await sql`
+    const rows = await this.sql.begin(async (sql) => {
+      const created = await sql<ChannelRecord[]>`
         INSERT INTO channels (id, name, description, project_id)
         VALUES (${id}, ${input.name}, ${description}, ${projectId})
+        RETURNING id, public_id::text AS "publicId", name, description,
+                  last_message AS "lastMessage", project_id AS "projectId"
       `;
       await this.attachChannelParties(sql, id, input.userId, input.agentId);
+      return created;
     });
-    return { id, name: input.name, description, lastMessage: null, projectId };
+    const row = rows.at(0);
+    if (row === undefined) {
+      throw new Error('Failed to create channel.');
+    }
+    return row;
   }
 
   public async listSkills(): Promise<SkillRecord[]> {
@@ -867,7 +906,7 @@ export class PostgresStore implements GabotStore {
       FROM channels c
       JOIN projects p ON p.id = c.project_id
       JOIN workspaces w ON w.id = p.workspace_id
-      WHERE c.id = ${channelId}
+      WHERE c.id = ${channelId} OR c.public_id::text = ${channelId}
     `;
     const row = rows.at(0);
     if (row === undefined || !row.project_id) {
@@ -1189,6 +1228,7 @@ export class PostgresStore implements GabotStore {
     const workspaceId = this.workspaceId;
     const projectId = workspaceProjectId(workspaceId);
     const channelId = workspaceDefaultChannelId(workspaceId);
+    const slug = workspaceSlug(workspaceId);
     const orgRole = owner.isAdmin ? 'admin' : 'member';
     await this.sql.begin(async (sql) => {
       await sql`
@@ -1201,8 +1241,8 @@ export class PostgresStore implements GabotStore {
         ON CONFLICT DO NOTHING
       `;
       const created = await sql<{ id: string }[]>`
-        INSERT INTO workspaces (id, organization_id, owner_user_id, name)
-        VALUES (${workspaceId}, ${PLATFORM_ORG_ID}, ${owner.id}, ${owner.name})
+        INSERT INTO workspaces (id, organization_id, owner_user_id, name, slug)
+        VALUES (${workspaceId}, ${PLATFORM_ORG_ID}, ${owner.id}, ${owner.name}, ${slug})
         ON CONFLICT (id) DO NOTHING
         RETURNING id
       `;
@@ -1228,15 +1268,11 @@ export class PostgresStore implements GabotStore {
   }
 
   private async retireSharedGeneral(sql: TxSql, userId: string): Promise<void> {
-    await Promise.all([
-      sql`
-        DELETE FROM channel_memberships WHERE channel_id = 'general' AND user_id = ${userId}
-      `,
-      sql`
-        DELETE FROM channel_participants
-        WHERE channel_id = 'general' AND principal_type = 'user' AND principal_id = ${userId}
-      `,
-    ]);
+    // Clean bootstrap (ADR 0013/0019) has channel_participants only — no channel_memberships.
+    await sql`
+      DELETE FROM channel_participants
+      WHERE channel_id = 'general' AND principal_type = 'user' AND principal_id = ${userId}
+    `;
   }
 
   private async attachChannelParties(

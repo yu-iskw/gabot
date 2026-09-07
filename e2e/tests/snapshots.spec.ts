@@ -7,6 +7,7 @@ const EMAIL = 'admin@example.com';
 
 async function signIn(page: Page): Promise<void> {
   await page.goto('/');
+  await page.getByTestId('workspace-locate-gabot').click();
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByTestId('user-email')).toHaveText(EMAIL);
 }
@@ -31,6 +32,8 @@ test('snapshots OpenBot-equivalent screens and use cases', async ({ page }) => {
   await mkdir(dir, { recursive: true });
 
   await page.goto('/');
+  await shot(page, dir, '01-locate.png');
+  await page.getByTestId('workspace-locate-gabot').click();
   await shot(page, dir, '01-sign.png');
 
   await signIn(page);
@@ -63,15 +66,15 @@ test('snapshots OpenBot-equivalent screens and use cases', async ({ page }) => {
   await shot(page, dir, '07-routines-after-schedule.png');
 
   const rest: Array<[string, string]> = [
-    ['/skills', '09-skills.png'],
-    ['/admin', '10-admin.png'],
-    ['/admin/audit', '11-admin-audit.png'],
-    ['/admin/boundaries', '12-admin-boundaries.png'],
-    ['/admin/plugins', '14-admin-plugins.png'],
-    ['/admin/people', '15-admin-people.png'],
-    ['/admin/credentials', '16-admin-credentials.png'],
-    ['/admin/identity-providers', '17-admin-identity.png'],
-    ['/settings', '18-settings.png'],
+    ['/workspaces/gabot/skills', '09-skills.png'],
+    ['/workspaces/gabot/admin', '10-admin.png'],
+    ['/workspaces/gabot/admin/audit', '11-admin-audit.png'],
+    ['/workspaces/gabot/admin/boundaries', '12-admin-boundaries.png'],
+    ['/workspaces/gabot/admin/plugins', '14-admin-plugins.png'],
+    ['/workspaces/gabot/admin/people', '15-admin-people.png'],
+    ['/workspaces/gabot/admin/credentials', '16-admin-credentials.png'],
+    ['/workspaces/gabot/admin/identity-providers', '17-admin-identity.png'],
+    ['/workspaces/gabot/settings', '18-settings.png'],
   ];
   for (const [route, file] of rest) {
     await page.goto(route);
@@ -83,12 +86,12 @@ test('snapshots OpenBot-equivalent screens and use cases', async ({ page }) => {
   await page.getByRole('switch', { name: 'Dark theme' }).click();
   await shot(page, dir, '19-settings-dark.png');
 
-  await page.goto('/admin/plugins/mock');
+  await page.goto('/workspaces/gabot/admin/plugins/mock');
   await expect(page.getByTestId('user-email')).toHaveText(EMAIL);
   await expect(page.locator('main h1')).toHaveText('Mock MCP');
   await shot(page, dir, '20-plugin-detail.png');
 
-  await page.goto('/admin/plugins/mock/tools/echo');
+  await page.goto('/workspaces/gabot/admin/plugins/mock/tools/echo');
   await expect(page.locator('main h1')).toHaveText('echo');
   await shot(page, dir, '21-plugin-tool.png');
 

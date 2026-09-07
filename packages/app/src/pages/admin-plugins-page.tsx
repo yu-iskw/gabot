@@ -12,6 +12,8 @@ import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
 import { pluginRowSummary } from '../lib/grant-summary.js';
 import { useSession } from '../lib/session-context.js';
+import { useWorkspaceDirectory } from '../lib/workspace-directory-context.js';
+import { useWorkspaceHref } from '../lib/workspace-href.js';
 
 type PluginListItem = {
   grantedCount: number;
@@ -23,6 +25,8 @@ type PluginListItem = {
 };
 
 export function AdminPluginsPage() {
+  const adminHome = useWorkspaceHref('/admin');
+  const { slug } = useWorkspaceDirectory();
   const { token } = useAuth();
   const { queryKey } = useSession();
   const plugins = useQuery({
@@ -38,7 +42,7 @@ export function AdminPluginsPage() {
 
   return (
     <PageShell
-      backButton={{ label: 'Admin', to: '/admin' }}
+      backButton={{ label: 'Admin', to: adminHome }}
       title="Plugins"
       description="What this deployment can reach. Adding a plugin is catalog only; owner grants decide invocation."
     >
@@ -54,7 +58,7 @@ export function AdminPluginsPage() {
               <div key={plugin.id}>
                 {index > 0 ? <Separator /> : null}
                 <ItemRow
-                  to={`/admin/plugins/${plugin.id}`}
+                  to={`/workspaces/${slug}/admin/plugins/${plugin.id}`}
                   title={plugin.title}
                   description={`${plugin.vendor} · ${plugin.url}`}
                   summary={pluginRowSummary(plugin.toolCount, plugin.grantedCount)}

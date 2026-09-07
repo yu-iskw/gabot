@@ -1,0 +1,173 @@
+# Optional second backend (ADR 0014 / ADR 0021 local fidelity).
+# Activated with: docker compose --profile dual …  or  COMPOSE_PROFILES=dual
+# See https://docs.docker.com/compose/how-tos/profiles/
+#
+# Shares omni, scripted-model, and mcp-mock with the default stack.
+# Uses database gabot_b, workspace ws-gabot-b, and Auth emulator auth-b
+# (project/audience demo-gabot-b on 127.0.0.1:9199).
+
+services:
+  auth-b:
+    profiles: [dual]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.firebase
+    command: [firebase, emulators:start, --only, auth, --project, demo-gabot-b]
+    ports:
+      - 127.0.0.1:9199:9099
+    healthcheck:
+      test: node -e "fetch('http://127.0.0.1:9099').then(()=>process.exit(0),()=>process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  create-db-b:
+    profiles: [dual]
+    image: pgvector/pgvector:pg17
+    environment:
+      PGPASSWORD: gabot
+    entrypoint: [/bin/bash, -c]
+    command:
+      - >-
+        psql -h omni -U gabot -d postgres -tc
+        "SELECT 1 FROM pg_database WHERE datname = 'gabot_b'" | grep -q 1
+        || psql -h omni -U gabot -d postgres -v ON_ERROR_STOP=1
+        -c "CREATE DATABASE gabot_b"
+    depends_on:
+      omni:
+        condition: service_healthy
+    restart: 'no'
+    networks:
+      - data
+
+  migrate-b:
+    profiles: [dual]
+    # Atlas Community Edition (ADR 0019). Pin version; do not use latest.
+    image: arigaio/atlas:1.3.3-community
+    volumes:
+      - ../db/migrations:/migrations:ro
+    command:
+      - migrate
+      - apply
+      - --url
+      - postgres://gabot:gabot@omni:5432/gabot_b?sslmode=disable
+      - --dir
+      - file://migrations
+    depends_on:
+      create-db-b:
+        condition: service_completed_successfully
+    restart: 'no'
+    networks:
+      - data
+
+  seed-b:
+    profiles: [dual]
+    image: pgvector/pgvector:pg17
+    volumes:
+      - ../db/seed:/seed:ro
+    environment:
+      PGPASSWORD: gabot
+    command: [psql, -h, omni, -U, gabot, -d, gabot_b, -v, ON_ERROR_STOP=1, -f, /seed/dev.sql]
+    depends_on:
+      migrate-b:
+        condition: service_completed_successfully
+    restart: 'no'
+    networks:
+      - data
+
+  agent-b:
+    profiles: [dual]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      args:
+        PACKAGE: agent
+    environment:
+      PORT: 4200
+      GABOT_MODEL_PROVIDER: mastra-scripted
+      MODEL_BASE_URL: http://scripted-model:4400/v1
+      DATABASE_URL: postgres://gabot:gabot@omni:5432/gabot_b
+      GABOT_IDENTITY_SECRET: gabot-dev-identity-secret
+      API_AUDIENCE: http://api-b:3001
+    ports:
+      - 127.0.0.1:4201:4200
+    depends_on:
+      scripted-model:
+        condition: service_healthy
+      seed-b:
+        condition: service_completed_successfully
+    healthcheck:
+      test: node -e "fetch('http://127.0.0.1:4200/health').then(r=>process.exit(r.ok?0:1))"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - default
+      - data
+
+  api-b:
+    profiles: [dual]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      args:
+        PACKAGE: api
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgres://gabot:gabot@omni:5432/gabot_b
+      FIREBASE_AUTH_EMULATOR_HOST: auth-b:9099
+      FIREBASE_PROJECT_ID: demo-gabot-b
+      GABOT_TOKEN_ISSUER: https://securetoken.google.com/demo-gabot-b
+      GABOT_TOKEN_AUDIENCE: demo-gabot-b
+      GABOT_WORKSPACE_ID: ws-gabot-b
+      AGENT_URL: http://agent-b:4200
+      MCP_MOCK_URL: http://mcp-mock:4300
+      GABOT_IDENTITY_SECRET: gabot-dev-identity-secret
+      KEY_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      INITIAL_ADMIN_EMAILS: admin@example.com
+      WORKER_SHARED_SECRET: gabot-dev-worker-secret
+    ports:
+      - 127.0.0.1:3002:3001
+    depends_on:
+      seed-b:
+        condition: service_completed_successfully
+      auth-b:
+        condition: service_healthy
+      agent-b:
+        condition: service_healthy
+      mcp-mock:
+        condition: service_healthy
+    healthcheck:
+      test: node -e "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1))"
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks:
+      - default
+      - data
+
+  jobs-b:
+    profiles: [dual]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      args:
+        PACKAGE: jobs
+    environment:
+      PORT: 4600
+      DATABASE_URL: postgres://gabot:gabot@omni:5432/gabot_b
+      API_INTERNAL_URL: http://api-b:3001
+      WORKER_SHARED_SECRET: gabot-dev-worker-secret
+    depends_on:
+      seed-b:
+        condition: service_completed_successfully
+      api-b:
+        condition: service_healthy
+    healthcheck:
+      test: node -e "fetch('http://127.0.0.1:4600/health').then(r=>process.exit(r.ok?0:1))"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - default
+      - data

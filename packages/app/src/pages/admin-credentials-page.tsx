@@ -11,6 +11,7 @@ import {
 import { Separator } from '../components/ui/separator.js';
 import { useAuth } from '../lib/auth-context.js';
 import { useSession } from '../lib/session-context.js';
+import { useWorkspaceHref } from '../lib/workspace-href.js';
 
 type OwnerConnection = {
   credentialRef: string;
@@ -20,6 +21,7 @@ type OwnerConnection = {
 };
 
 export function AdminCredentialsPage() {
+  const adminHome = useWorkspaceHref('/admin');
   const { token } = useAuth();
   const { queryKey } = useSession();
   const listed = useQuery({
@@ -36,7 +38,7 @@ export function AdminCredentialsPage() {
 
   return (
     <PageShell
-      backButton={{ label: 'Admin', to: '/admin' }}
+      backButton={{ label: 'Admin', to: adminHome }}
       title="Credentials"
       description="Owner connections. Bots never receive these refs."
     >

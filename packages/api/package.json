@@ -6,14 +6,12 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "migrate": "node dist/migrate.js"
+    "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.59",
     "@gabot/common": "workspace:*",
     "@hono/node-server": "^1.19.0",
-    "drizzle-orm": "^0.45.2",
     "firebase-admin": "^13.5.0",
     "hono": "^4.9.8",
     "postgres": "^3.4.7"

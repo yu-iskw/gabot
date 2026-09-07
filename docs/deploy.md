@@ -2,6 +2,10 @@
 
 This repository is testable with Docker Compose. Live GCP is not required for `pnpm test` or `pnpm test:e2e`. Use these flags when you do deploy.
 
+For a **second local backend** (ADR 0014 / ADR 0020 / ADR 0021), use Compose profile `dual`: `pnpm compose:up:dual`. The app locates a workspace (slug or domain) then authenticates to that backend’s IdP; only active members complete login. Switching workspace signs out and re-auths. Backend B listens on `127.0.0.1:3002` with Auth emulator `127.0.0.1:9199` (`demo-gabot-b`). For Vertex + dual: `pnpm compose:up:dual:vertex`. See [`compose/dual.yml`](../compose/dual.yml) and [Compose profiles](https://docs.docker.com/compose/how-tos/profiles/).
+
+**Add a workspace:** directory row (`slug`, `domain`, `authDomain`, `tokenAudience`, `upstream`), Identity Platform tenant or Auth emulator, and the API stack. **Retire one:** remove the directory row, disable that tenant, take down that API. Other workspace sessions stay valid.
+
 For **live Gemini on Vertex** locally (Mastra Agent + `@ai-sdk/google-vertex`), use the dual-track overlay:
 
 ```bash
@@ -28,7 +32,7 @@ Agent Gateway does **not** govern Cloud Run. Use IAM `roles/run.invoker` plus th
 
 ## Identity
 
-People: Identity Platform (same Firebase Admin SDK as the Auth emulator).
+People: Identity Platform per backend (same Firebase Admin SDK as the Auth emulator). Each backend has its own `GABOT_TOKEN_AUDIENCE`. People login is membership-gated (ADR 0021).
 
 Agents: Cloud Run Agent Identity principals. Compose mints SPIFFE-shaped HMAC tokens via `AgentIdentityPort`.
 
@@ -39,6 +43,28 @@ Registry: production introspects `/.well-known/agent-card.json`. Compose uses `R
 AlloyDB (production) / AlloyDB Omni or `pgvector/pgvector:pg17` (Compose). Direct VPC egress from Cloud Run to AlloyDB. Threads live in AlloyDB (`threads`, `messages`), not CopilotKit Intelligence or Vertex Sessions.
 
 Mastra `PostgresStore` uses the same instance (`mastra_threads` / `mastra_messages`). Mastra A2A task resume is in-memory and is **not** the handoff log; hops use `work_items`.
+
+### Schema migrate Job
+
+Production schema changes use **Atlas Community Edition** (ADR 0019). Package the pinned image and migration directory (or bake `db/migrations` into a thin image) and execute:
+
+```bash
+gcloud beta run jobs execute gabot-migrate --region=REGION
+```
+
+Job command equivalent:
+
+```bash
+docker run --rm \
+  -e DATABASE_URL="postgres://USER:PASS@HOST:5432/gabot?sslmode=require" \
+  -v "$PWD/db/migrations:/migrations:ro" \
+  arigaio/atlas:1.3.3-community \
+  migrate apply \
+  --url "$DATABASE_URL" \
+  --dir file://migrations
+```
+
+Do **not** run Compose `db/seed/dev.sql` in production Jobs. Seed is local/Compose only. Do not use Atlas Cloud tokens for apply.
 
 Example:
 

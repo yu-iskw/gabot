@@ -2,12 +2,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { signOut } from 'firebase/auth';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
-import { apiJson } from '../api.js';
+import { ApiRequestError, apiJson } from '../api.js';
 import { Button } from '../components/ui/button.js';
 import { apiBase } from '../config.js';
 
 import { useAuth } from './auth-context.js';
 import { parseSessionMe, sessionOrigin, sessionQueryKey } from './session-scope.js';
+import { useWorkspaceDirectory } from './workspace-directory-context.js';
 
 import type { SessionMe, SessionScope } from './session-scope.js';
 import type { ReactNode } from 'react';
@@ -23,6 +24,7 @@ const SessionContext = createContext<SessionValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { auth, token, user } = useAuth();
+  const { entry } = useWorkspaceDirectory();
   const queryClient = useQueryClient();
   const tokenRef = useRef(token);
   tokenRef.current = token;
@@ -34,9 +36,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     enabled: uid !== null,
     queryFn: async () =>
       parseSessionMe(await apiJson<unknown>('/api/me', await tokenRef.current())),
-    queryKey: [SESSION_ME_QUERY, uid],
+    queryKey: [SESSION_ME_QUERY, uid, entry.slug],
     refetchOnReconnect: true,
-    retry: 3,
+    retry: (failureCount, error) => {
+      if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403)) {
+        return false;
+      }
+      return failureCount < 3;
+    },
   });
   const parsed = sessionQuery.data ?? null;
 
@@ -60,7 +67,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     const scope: SessionScope = {
       generation,
-      origin,
+      origin: `${origin}|${entry.slug}`,
       principalId: parsed.id,
       workspaceId: parsed.workspaceId,
     };
@@ -68,20 +75,55 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       me: parsed,
       queryKey: (...parts: readonly unknown[]) => sessionQueryKey(scope, ...parts),
     };
-  }, [generation, origin, parsed]);
+  }, [entry.slug, generation, origin, parsed]);
 
   if (sessionQuery.isError && !parsed) {
+    const denied =
+      sessionQuery.error instanceof ApiRequestError && sessionQuery.error.status === 403;
     return (
       <div className="flex flex-col items-start gap-3 p-6">
-        <p className="text-sm text-muted-foreground">Could not load this workspace session</p>
+        <p className="text-sm text-muted-foreground">
+          {denied
+            ? "You don't have access to this workspace"
+            : 'Could not load this workspace session'}
+        </p>
         <div className="flex gap-2">
           <Button disabled={sessionQuery.isFetching} onClick={() => void sessionQuery.refetch()}>
             Retry
           </Button>
-          <Button aria-label="Sign out" variant="ghost" onClick={() => void signOut(auth)}>
+          <Button
+            aria-label="Sign out"
+            variant="ghost"
+            onClick={() => {
+              if (auth) {
+                void signOut(auth);
+              }
+            }}
+          >
             Sign out
           </Button>
         </div>
+      </div>
+    );
+  }
+  if (parsed?.workspaceId && parsed.workspaceId !== entry.workspaceId) {
+    return (
+      <div className="flex flex-col items-start gap-3 p-6">
+        <p className="text-sm text-muted-foreground">
+          This directory entry expects workspace {entry.workspaceId}, but the backend session is{' '}
+          {parsed.workspaceId}.
+        </p>
+        <Button
+          aria-label="Sign out"
+          variant="ghost"
+          onClick={() => {
+            if (auth) {
+              void signOut(auth);
+            }
+          }}
+        >
+          Sign out
+        </Button>
       </div>
     );
   }

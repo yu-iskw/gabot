@@ -1,6 +1,6 @@
 export function readRouteString(
   value: unknown,
-  key: 'channelId' | 'pluginId' | 'toolName',
+  key: 'channelId' | 'channelPublicId' | 'pluginId' | 'toolName' | 'workspaceSlug',
   fallback: string,
 ): string {
   if (typeof value !== 'object' || value === null) {
@@ -13,17 +13,23 @@ export function readRouteString(
 
 function field(
   record: Record<string, unknown>,
-  key: 'channelId' | 'pluginId' | 'toolName',
+  key: 'channelId' | 'channelPublicId' | 'pluginId' | 'toolName' | 'workspaceSlug',
 ): unknown {
   switch (key) {
     case 'channelId': {
       return record.channelId;
+    }
+    case 'channelPublicId': {
+      return record.channelPublicId;
     }
     case 'pluginId': {
       return record.pluginId;
     }
     case 'toolName': {
       return record.toolName;
+    }
+    case 'workspaceSlug': {
+      return record.workspaceSlug;
     }
     default: {
       const exhaustive: never = key;

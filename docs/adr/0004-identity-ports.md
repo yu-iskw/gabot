@@ -26,7 +26,10 @@ Firebase Auth emulator.
 The API verifies people tokens the same way in both environments (Firebase Admin),
 then maps `iss` / `aud` / `sub` into an `IdentityKey`. Email is an attribute, not
 the join key. Each backend configures `GABOT_TOKEN_ISSUER` and
-`GABOT_TOKEN_AUDIENCE` and rejects tokens for another audience.
+`GABOT_TOKEN_AUDIENCE` and rejects tokens for another audience. Dual Compose
+gives backend B its own Auth emulator and audience
+([0021](0021-per-backend-membership-gated-workspace-login.md)). A valid token is
+not a session until that backend has active membership.
 
 ## Consequences
 

@@ -42,7 +42,11 @@ Install does not authorize invoke.
 The client is company-hosted. It talks to the selected backend over a session
 bound to that origin. There is no cross-workspace search, memory, credential
 reuse, delegation, or data transfer in the first release. Shared company name,
-email domain, or identity provider is not trust.
+email domain, or identity provider is not trust. People login is locator-first
+and membership-gated per backend
+([0021](0021-per-backend-membership-gated-workspace-login.md)): the user names a
+workspace domain or slug, authenticates to that backend’s IdP, and is refused
+unless they are an active member.
 
 Channels still belong to a project. `channel_participants` remains the
 collaboration roster. Humans join through workspace membership, not a
@@ -76,3 +80,10 @@ client caches, events, or navigation. Unique-owner SQL
 helpers in `@gabot/common` fail closed. Computer removal is
 [ADR 0016](0016-built-in-computer-out-of-product-scope.md). Schema cutover is
 [ADR 0017](0017-clean-bootstrap-prototype-is-reference.md).
+
+The company-hosted client hosts a **workspace directory** and Slack-like
+switcher. Selecting a workspace binds the BFF to that entry’s backend origin
+and navigates under `/workspaces/<slug>/…` ([ADR 0020](0020-client-workspace-directory-and-navigation-urls.md)).
+Login is per-backend and membership-gated ([ADR 0021](0021-per-backend-membership-gated-workspace-login.md)).
+Switching workspace switches the origin-bound session; it does not merge data
+planes.

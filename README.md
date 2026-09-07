@@ -29,6 +29,22 @@ pnpm test:e2e
 
 The Compose file is [`compose/docker-compose.yml`](compose/docker-compose.yml). It runs the entire product, including the API and app. After Compose is up, open `http://127.0.0.1:3010` in a browser.
 
+Optional second backend (Compose profile `dual`, see [profiles](https://docs.docker.com/compose/how-tos/profiles/)):
+
+```bash
+pnpm compose:up:dual
+```
+
+That starts backend B on `http://127.0.0.1:3002` (distinct DB `gabot_b`, workspace `ws-gabot-b`, Auth emulator `127.0.0.1:9199` / audience `demo-gabot-b`). The company-hosted app locates a workspace by slug or domain, then signs in to **that** backend’s IdP (ADR 0021). Directory: [`packages/app/workspace-directory.json`](packages/app/workspace-directory.json). Routes stay under `/workspaces/<slug>/…` (ADR 0020). Use `COMPOSE_PROFILES=dual` if you prefer the env-var form. `pnpm compose:down` passes `--profile dual` so profiled containers are removed.
+
+For **20+ turn bot relays on Vertex** against both backends:
+
+```bash
+pnpm compose:up:dual:vertex
+GABOT_LIVE_GEMINI=1 pnpm test:e2e:live-gemini
+GABOT_LIVE_GEMINI=1 GABOT_LIVE_API_ONLY=1 GABOT_API_URL=http://127.0.0.1:3002 GABOT_LIVE_CHANNEL_ID=ch-gabot-b-general GABOT_AUTH_EMULATOR=http://127.0.0.1:9199 GABOT_FIREBASE_API_KEY=demo-gabot-b pnpm test:e2e:live-gemini
+```
+
 Default emulator user for tests: `admin@example.com` / `gabot-admin-pass`.
 
 ### Supply-chain protections

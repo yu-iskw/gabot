@@ -21,8 +21,9 @@ async function emulatorIdToken(): Promise<string> {
   return body.idToken;
 }
 
-async function signIn(page: Page): Promise<void> {
+async function signIn(page: Page, workspaceSlug = 'gabot'): Promise<void> {
   await page.goto('/');
+  await page.getByTestId(`workspace-locate-${workspaceSlug}`).click();
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByTestId('user-email')).toHaveText(EMAIL);
 }
@@ -36,6 +37,14 @@ async function signInAndOpenGeneral(page: Page): Promise<void> {
   await signIn(page);
   await openGeneral(page);
 }
+
+test('workspace switcher lists directory entries', async ({ page }) => {
+  await signIn(page);
+  await expect(page).toHaveURL(/\/workspaces\/gabot/);
+  await page.getByTestId('workspace-switcher').click();
+  await expect(page.getByTestId('workspace-option-gabot')).toBeVisible();
+  await expect(page.getByTestId('workspace-option-gabot-b')).toBeVisible();
+});
 
 test('refuses MCP echo when a deny rule is in force', async ({ page, request }) => {
   const token = await emulatorIdToken();
@@ -129,9 +138,7 @@ test('edits an agent title and deletes a created agent', async ({ page }) => {
 });
 
 test('creates and edits a skill from Skills', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByTestId('user-email')).toHaveText(EMAIL);
+  await signIn(page);
   await page.getByRole('link', { name: 'Skills' }).click();
   await page.getByTestId('new-skill').click();
   await page.locator('input[name="skill-slug"]').fill('lifecycle-brief');
@@ -169,7 +176,7 @@ test('grants MCP echo from Plugins so a bot can call it', async ({ page, request
   const token = await emulatorIdToken();
   try {
     await signIn(page);
-    await page.goto('/admin/plugins/mock/tools/echo');
+    await page.goto('/workspaces/gabot/admin/plugins/mock/tools/echo');
     await expect(page.locator('main h1')).toHaveText('echo');
     await page.getByRole('switch', { name: 'Grant echo for this workspace' }).click();
     await expect(

@@ -110,6 +110,7 @@ export {
   TEAM_BOT_PROFILES,
   workspaceDefaultChannelId,
   workspaceProjectId,
+  workspaceSlug,
 } from './tenancy.js';
 export type { IdentityTeammate, SeedParticipant, TeamBotProfile } from './tenancy.js';
 export type { DelegateToBotTool } from './tool-catalog.js';
