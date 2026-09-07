@@ -19,13 +19,11 @@ import {
   TURN_TOOLS,
 } from '@gabot/common';
 
-import type { IdentityTeammate } from '@gabot/common';
-
 import { runGatewayAction } from './gateway.js';
 import { PROTECTED_AGENT_ID } from './store/types.js';
 
 import type { GabotStore, RunRecord, RunTriggerType, SessionUser } from './store/types.js';
-import type { AguiRunInput, AguiToolCall, ModelPort } from '@gabot/common';
+import type { AguiRunInput, AguiToolCall, IdentityTeammate, ModelPort } from '@gabot/common';
 
 let cachedExecutorId: string | undefined;
 
@@ -111,18 +109,20 @@ type OfferedTool = {
   parameters: Record<string, unknown>;
 };
 
+async function channelBotIds(store: GabotStore, channelId: string): Promise<string[]> {
+  return (await store.listChannelParticipants(channelId))
+    .filter((row) => row.principalType === 'bot')
+    .map((row) => row.principalId);
+}
+
 async function channelBotRoster(
   store: GabotStore,
   channelId: string,
 ): Promise<{ botIds: string[]; teammates: IdentityTeammate[] }> {
-  const participants = await store.listChannelParticipants(channelId);
-  const botIds = participants
-    .filter((row) => row.principalType === 'bot')
-    .map((row) => row.principalId);
-  const agents = await store.listAgents();
-  const byId = new Map(agents.map((agent) => [agent.id, agent]));
-  const teammates: IdentityTeammate[] = botIds.map((id) => {
-    const agent = byId.get(id);
+  const botIds = await channelBotIds(store, channelId);
+  const agents = await Promise.all(botIds.map((id) => store.getAgent(id)));
+  const teammates: IdentityTeammate[] = botIds.map((id, index) => {
+    const agent = agents.at(index);
     return {
       id,
       title: agent?.title ?? agent?.name,
@@ -135,17 +135,11 @@ async function channelBotRoster(
 function offeredToolsForRoster(botIds: readonly string[]): OfferedTool[] {
   const delegate = buildDelegateToBotTool(botIds);
   return TURN_TOOLS.map((tool) => {
-    if (tool.name === DELEGATE_TO_BOT) {
-      return {
-        name: delegate.name,
-        description: delegate.description,
-        parameters: { ...delegate.parameters },
-      };
-    }
+    const source = tool.name === DELEGATE_TO_BOT ? delegate : tool;
     return {
-      name: tool.name,
-      description: tool.description,
-      parameters: { ...tool.parameters },
+      name: source.name,
+      description: source.description,
+      parameters: { ...source.parameters },
     };
   });
 }
@@ -162,9 +156,7 @@ export function isTurnClientError(error: unknown): boolean {
 }
 
 async function defaultParticipantBotId(store: GabotStore, channelId: string): Promise<string> {
-  const bots = (await store.listChannelParticipants(channelId))
-    .filter((row) => row.principalType === 'bot')
-    .map((row) => row.principalId);
+  const bots = await channelBotIds(store, channelId);
   if (bots.includes(PROTECTED_AGENT_ID)) {
     return PROTECTED_AGENT_ID;
   }

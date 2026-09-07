@@ -62,3 +62,26 @@ export function parseStringUnion<T extends string>(
   }
   return contractOk(match);
 }
+
+/** Map a JSON array through an item parser; `undefined`/`null` become `[]`. */
+export function parseContractList<T>(
+  value: unknown,
+  field: string,
+  parseItem: (item: unknown) => ContractResult<T>,
+): ContractResult<readonly T[]> {
+  if (value === undefined || value === null) {
+    return contractOk([]);
+  }
+  if (!Array.isArray(value)) {
+    return contractFail(`${field} must be an array.`);
+  }
+  const list: T[] = [];
+  for (const item of value) {
+    const parsed = parseItem(item);
+    if (!parsed.ok) {
+      return parsed;
+    }
+    list.push(parsed.value);
+  }
+  return contractOk(list);
+}

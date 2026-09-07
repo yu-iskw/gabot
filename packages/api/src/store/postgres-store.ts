@@ -12,6 +12,7 @@ import {
   parseMembershipStatus,
   parseWorkspaceRole,
   PLATFORM_ORG_ID,
+  slugifyBotId,
   workspaceDefaultChannelId,
   workspaceProjectId,
 } from '@gabot/common';
@@ -584,7 +585,11 @@ export class PostgresStore implements GabotStore {
     roleDescription: string;
     visibility?: string;
   }): Promise<AgentProfile> {
-    const existing = await this.sql<{ id: string }[]>`SELECT id FROM agents`;
+    const base = slugifyBotId(input.name || input.title);
+    const like = `${base}-%`;
+    const existing = await this.sql<{ id: string }[]>`
+      SELECT id FROM agents WHERE id = ${base} OR id LIKE ${like}
+    `;
     const id = allocateBotId(input.name || input.title, new Set(existing.map((row) => row.id)));
     const visibility = input.visibility ?? 'public';
     await this.sql`

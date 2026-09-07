@@ -3,11 +3,13 @@ import { randomUUID } from 'node:crypto';
 import {
   contractFail,
   contractOk,
+  parseContractList,
   parseNonEmptyString,
   parseOptionalNonEmptyString,
   parseRecord,
   parseStringUnion,
 } from './contract-result.js';
+import { parseAbsoluteHttpUrl } from './http-origin.js';
 
 import type { CatalogInvocationFlags } from './catalog-stage.js';
 import type { ContractResult } from './contract-result.js';
@@ -50,6 +52,8 @@ export const FORBIDDEN_SECRET_KEYS = [
   'connection_id',
   'connectionId',
 ] as const;
+
+const FORBIDDEN_SECRET_KEY_SET: ReadonlySet<string> = new Set(FORBIDDEN_SECRET_KEYS);
 
 export type CapabilityRequirement = {
   capability: string;
@@ -228,13 +232,9 @@ export function assertNoSecretsInDeclaration(value: unknown): ContractResult<voi
 }
 
 export function parseCapabilityRequirement(value: unknown): ContractResult<CapabilityRequirement> {
-  const record = parseRecord(value, 'Capability requirement must be an object.');
+  const record = parseSecretFreeRecord(value, 'Capability requirement must be an object.');
   if (!record.ok) {
     return record;
-  }
-  const secrets = assertNoSecretsInDeclaration(record.value);
-  if (!secrets.ok) {
-    return secrets;
   }
   const capability = parseNonEmptyString(record.value.capability, 'capability is required.');
   if (!capability.ok) {
@@ -247,34 +247,26 @@ export function parseCapabilityRequirement(value: unknown): ContractResult<Capab
   if (!resourceHint.ok) {
     return resourceHint;
   }
-  let catalogEntryId: string | undefined;
-  if (record.value.catalogEntryId !== undefined && record.value.catalogEntryId !== null) {
-    const parsed = parseCatalogUuid(
-      record.value.catalogEntryId,
-      'capability catalogEntryId must be a UUID.',
-    );
-    if (!parsed.ok) {
-      return parsed;
-    }
-    catalogEntryId = parsed.value;
+  const catalogEntryId = parseOptionalCatalogUuid(
+    record.value.catalogEntryId,
+    'capability catalogEntryId must be a UUID.',
+  );
+  if (!catalogEntryId.ok) {
+    return catalogEntryId;
   }
   return contractOk({
     capability: capability.value,
     ...(resourceHint.value === undefined ? {} : { resourceHint: resourceHint.value }),
-    ...(catalogEntryId === undefined ? {} : { catalogEntryId }),
+    ...(catalogEntryId.value === undefined ? {} : { catalogEntryId: catalogEntryId.value }),
   });
 }
 
 export function parseBotTemplateDeclaration(
   value: unknown,
 ): ContractResult<BotTemplateDeclaration> {
-  const record = parseRecord(value, 'Bot template declaration must be an object.');
+  const record = parseSecretFreeRecord(value, 'Bot template declaration must be an object.');
   if (!record.ok) {
     return record;
-  }
-  const secrets = assertNoSecretsInDeclaration(record.value);
-  if (!secrets.ok) {
-    return secrets;
   }
   const name = parseNonEmptyString(record.value.name, 'Bot template name is required.');
   if (!name.ok) {
@@ -291,15 +283,23 @@ export function parseBotTemplateDeclaration(
   if (!instruction.ok) {
     return instruction;
   }
-  const skillIds = parseUuidList(record.value.skillIds, 'skillIds');
+  const skillIds = parseContractList(record.value.skillIds, 'skillIds', (item) =>
+    parseCatalogUuid(item, 'skillIds entries must be UUIDs.'),
+  );
   if (!skillIds.ok) {
     return skillIds;
   }
-  const capabilityReqs = parseCapabilityRequirementList(record.value.capabilityReqs);
+  const capabilityReqs = parseContractList(
+    record.value.capabilityReqs,
+    'capabilityReqs',
+    parseCapabilityRequirement,
+  );
   if (!capabilityReqs.ok) {
     return capabilityReqs;
   }
-  const neverList = parseStringList(record.value.neverList, 'neverList');
+  const neverList = parseContractList(record.value.neverList, 'neverList', (item) =>
+    parseNonEmptyString(item, 'neverList entries must be strings.'),
+  );
   if (!neverList.ok) {
     return neverList;
   }
@@ -316,13 +316,9 @@ export function parseBotTemplateDeclaration(
 export function parseBotTeamTemplateDeclaration(
   value: unknown,
 ): ContractResult<BotTeamTemplateDeclaration> {
-  const record = parseRecord(value, 'Bot team template declaration must be an object.');
+  const record = parseSecretFreeRecord(value, 'Bot team template declaration must be an object.');
   if (!record.ok) {
     return record;
-  }
-  const secrets = assertNoSecretsInDeclaration(record.value);
-  if (!secrets.ok) {
-    return secrets;
   }
   const name = parseNonEmptyString(record.value.name, 'Bot team name is required.');
   if (!name.ok) {
@@ -335,35 +331,24 @@ export function parseBotTeamTemplateDeclaration(
   if (!description.ok) {
     return description;
   }
-  if (!Array.isArray(record.value.members)) {
-    return contractFail('Bot team members must be an array.');
+  const members = parseContractList(record.value.members, 'members', parseBotTeamMember);
+  if (!members.ok) {
+    return members;
   }
-  if (record.value.members.length === 0) {
+  if (members.value.length === 0) {
     return contractFail('Bot team members must not be empty.');
-  }
-  const members: BotTeamMember[] = [];
-  for (const item of record.value.members) {
-    const member = parseBotTeamMember(item);
-    if (!member.ok) {
-      return member;
-    }
-    members.push(member.value);
   }
   return contractOk({
     name: name.value,
     description: description.value,
-    members,
+    members: members.value,
   });
 }
 
 export function parseSkillDeclaration(value: unknown): ContractResult<SkillDeclaration> {
-  const record = parseRecord(value, 'Skill declaration must be an object.');
+  const record = parseSecretFreeRecord(value, 'Skill declaration must be an object.');
   if (!record.ok) {
     return record;
-  }
-  const secrets = assertNoSecretsInDeclaration(record.value);
-  if (!secrets.ok) {
-    return secrets;
   }
   const title = parseNonEmptyString(record.value.title, 'Skill title is required.');
   if (!title.ok) {
@@ -380,7 +365,11 @@ export function parseSkillDeclaration(value: unknown): ContractResult<SkillDecla
   if (!instructions.ok) {
     return instructions;
   }
-  const capabilityReqs = parseCapabilityRequirementList(record.value.capabilityReqs);
+  const capabilityReqs = parseContractList(
+    record.value.capabilityReqs,
+    'capabilityReqs',
+    parseCapabilityRequirement,
+  );
   if (!capabilityReqs.ok) {
     return capabilityReqs;
   }
@@ -393,13 +382,9 @@ export function parseSkillDeclaration(value: unknown): ContractResult<SkillDecla
 }
 
 export function parseMcpServerDeclaration(value: unknown): ContractResult<McpServerDeclaration> {
-  const record = parseRecord(value, 'MCP server declaration must be an object.');
+  const record = parseSecretFreeRecord(value, 'MCP server declaration must be an object.');
   if (!record.ok) {
     return record;
-  }
-  const secrets = assertNoSecretsInDeclaration(record.value);
-  if (!secrets.ok) {
-    return secrets;
   }
   const title = parseNonEmptyString(record.value.title, 'MCP server title is required.');
   if (!title.ok) {
@@ -435,13 +420,9 @@ export function parseMcpServerDeclaration(value: unknown): ContractResult<McpSer
 }
 
 export function parseA2AAgentDeclaration(value: unknown): ContractResult<A2AAgentDeclaration> {
-  const record = parseRecord(value, 'A2A agent declaration must be an object.');
+  const record = parseSecretFreeRecord(value, 'A2A agent declaration must be an object.');
   if (!record.ok) {
     return record;
-  }
-  const secrets = assertNoSecretsInDeclaration(record.value);
-  if (!secrets.ok) {
-    return secrets;
   }
   const title = parseNonEmptyString(record.value.title, 'A2A agent title is required.');
   if (!title.ok) {
@@ -451,10 +432,7 @@ export function parseA2AAgentDeclaration(value: unknown): ContractResult<A2AAgen
   if (!summary.ok) {
     return summary;
   }
-  const agentCardUrl = parseNonEmptyString(
-    record.value.agentCardUrl,
-    'A2A agentCardUrl is required.',
-  );
+  const agentCardUrl = parseAbsoluteHttpUrl(record.value.agentCardUrl, 'A2A agentCardUrl');
   if (!agentCardUrl.ok) {
     return agentCardUrl;
   }
@@ -462,77 +440,93 @@ export function parseA2AAgentDeclaration(value: unknown): ContractResult<A2AAgen
   if (!trustTier.ok) {
     return trustTier;
   }
-  const remoteSkillIds = parseStringList(record.value.remoteSkillIds, 'remoteSkillIds');
+  const remoteSkillIds = parseContractList(record.value.remoteSkillIds, 'remoteSkillIds', (item) =>
+    parseNonEmptyString(item, 'remoteSkillIds entries must be strings.'),
+  );
   if (!remoteSkillIds.ok) {
     return remoteSkillIds;
   }
   return contractOk({
     title: title.value,
     summary: summary.value,
-    agentCardUrl: agentCardUrl.value,
+    agentCardUrl: agentCardUrl.value.href,
     trustTier: trustTier.value,
     remoteSkillIds: remoteSkillIds.value,
   });
 }
 
-/**
- * Build an install checklist from capability requirements and current
- * catalog invocation flags per requirement. Missing connect/grant wins over ready.
- */
+/** Build an install checklist; missing connect/grant wins over ready. */
 export function buildInstallChecklist(
   requirements: readonly CapabilityRequirement[],
   flagsByCapability: ReadonlyMap<string, CatalogInvocationFlags>,
 ): InstallChecklist {
-  const items = requirements.flatMap((req) => checklistItemsForRequirement(req, flagsByCapability));
-  if (items.length === 0) {
-    return { items: [{ kind: 'ready' }], ready: true };
-  }
-  return { items, ready: false };
+  const items = requirements.flatMap((req) =>
+    checklistGap(req, flagsByCapability.get(req.capability)),
+  );
+  return items.length === 0 ? { items: [{ kind: 'ready' }], ready: true } : { items, ready: false };
 }
 
-function checklistItemsForRequirement(
+function checklistGap(
   req: CapabilityRequirement,
-  flagsByCapability: ReadonlyMap<string, CatalogInvocationFlags>,
+  flags: CatalogInvocationFlags | undefined,
 ): InstallChecklistItem[] {
-  const flags = flagsByCapability.get(req.capability);
   if (!flags?.connected) {
-    return [missingConnectItem(req)];
+    return [
+      {
+        kind: 'missingConnect',
+        capability: req.capability,
+        ...(req.catalogEntryId === undefined ? {} : { catalogEntryId: req.catalogEntryId }),
+      },
+    ];
   }
   if (!flags.granted) {
-    return [missingGrantItem(req)];
+    return [
+      {
+        kind: 'missingGrant',
+        capability: req.capability,
+        ...(req.resourceHint === undefined ? {} : { resourceHint: req.resourceHint }),
+        ...(req.catalogEntryId === undefined ? {} : { catalogEntryId: req.catalogEntryId }),
+      },
+    ];
   }
   return [];
 }
 
-function missingConnectItem(req: CapabilityRequirement): InstallChecklistItem {
-  return {
-    kind: 'missingConnect',
-    capability: req.capability,
-    ...(req.catalogEntryId === undefined ? {} : { catalogEntryId: req.catalogEntryId }),
-  };
-}
-
-function missingGrantItem(req: CapabilityRequirement): InstallChecklistItem {
-  return {
-    kind: 'missingGrant',
-    capability: req.capability,
-    ...(req.resourceHint === undefined ? {} : { resourceHint: req.resourceHint }),
-    ...(req.catalogEntryId === undefined ? {} : { catalogEntryId: req.catalogEntryId }),
-  };
-}
-
-/** MCP tool wire name from server slug + tool name (ADR 0018). */
 export function mcpToolWireName(serverSlug: string, toolName: string): string {
   return `mcp__${serverSlug}__${toolName}`;
 }
 
 /**
  * Gabot Skill rows use UUID primary keys. A2A agent-card `skills[].id` values are
- * card-local discovery labels (often short strings like `general`) and must not be
- * treated as Skill row ids or slash slugs without an explicit mapping step.
+ * card-local discovery labels and must not be treated as Skill row ids without mapping.
  */
 export function looksLikeGabotSkillRowId(value: string): boolean {
   return isCatalogUuid(value);
+}
+
+function parseSecretFreeRecord(
+  value: unknown,
+  reason: string,
+): ContractResult<Record<string, unknown>> {
+  const record = parseRecord(value, reason);
+  if (!record.ok) {
+    return record;
+  }
+  const secrets = assertNoSecretsInDeclaration(record.value);
+  if (!secrets.ok) {
+    return secrets;
+  }
+  return record;
+}
+
+function parseOptionalCatalogUuid(
+  value: unknown,
+  reason: string,
+): ContractResult<string | undefined> {
+  if (value === undefined || value === null) {
+    return contractOk(undefined);
+  }
+  return parseCatalogUuid(value, reason);
 }
 
 function parseBotTeamMember(value: unknown): ContractResult<BotTeamMember> {
@@ -554,108 +548,33 @@ function parseBotTeamMember(value: unknown): ContractResult<BotTeamMember> {
   return contractOk({ botTemplateId: botTemplateId.value, role: role.value });
 }
 
-function parseCapabilityRequirementList(
-  value: unknown,
-): ContractResult<readonly CapabilityRequirement[]> {
-  if (value === undefined || value === null) {
-    return contractOk([]);
-  }
-  if (!Array.isArray(value)) {
-    return contractFail('capabilityReqs must be an array.');
-  }
-  const list: CapabilityRequirement[] = [];
-  for (const item of value) {
-    const parsed = parseCapabilityRequirement(item);
-    if (!parsed.ok) {
-      return parsed;
-    }
-    list.push(parsed.value);
-  }
-  return contractOk(list);
-}
-
-function parseUuidList(value: unknown, field: string): ContractResult<readonly string[]> {
-  if (value === undefined || value === null) {
-    return contractOk([]);
-  }
-  if (!Array.isArray(value)) {
-    return contractFail(`${field} must be an array.`);
-  }
-  const list: string[] = [];
-  for (const item of value) {
-    const parsed = parseCatalogUuid(item, `${field} entries must be UUIDs.`);
-    if (!parsed.ok) {
-      return parsed;
-    }
-    list.push(parsed.value);
-  }
-  return contractOk(list);
-}
-
-function parseStringList(value: unknown, field: string): ContractResult<readonly string[]> {
-  if (value === undefined || value === null) {
-    return contractOk([]);
-  }
-  if (!Array.isArray(value)) {
-    return contractFail(`${field} must be an array.`);
-  }
-  const list: string[] = [];
-  for (const item of value) {
-    const parsed = parseNonEmptyString(item, `${field} entries must be strings.`);
-    if (!parsed.ok) {
-      return parsed;
-    }
-    list.push(parsed.value);
-  }
-  return contractOk(list);
-}
-
 function findForbiddenSecretKey(value: unknown, path: string[]): string | undefined {
   if (Array.isArray(value)) {
-    return findForbiddenInArray(value, path);
+    return firstForbidden(
+      value.map((item, index) => findForbiddenSecretKey(item, [...path, String(index)])),
+    );
   }
   if (typeof value !== 'object' || value === null) {
     return undefined;
   }
-  return findForbiddenInObject(value as Record<string, unknown>, path);
+  return firstForbidden(
+    Object.entries(value as Record<string, unknown>).map(([key, child]) =>
+      FORBIDDEN_SECRET_KEY_SET.has(key)
+        ? path.length === 0
+          ? key
+          : `${path.join('.')}.${key}`
+        : findForbiddenSecretKey(child, [...path, key]),
+    ),
+  );
 }
 
-function findForbiddenInArray(value: unknown[], path: string[]): string | undefined {
-  for (const [index, item] of value.entries()) {
-    const found = findForbiddenSecretKey(item, [...path, String(index)]);
-    if (found) {
-      return found;
-    }
-  }
-  return undefined;
-}
-
-function findForbiddenInObject(
-  record: Record<string, unknown>,
-  path: string[],
-): string | undefined {
-  for (const [key, child] of Object.entries(record)) {
-    if ((FORBIDDEN_SECRET_KEYS as readonly string[]).includes(key)) {
-      return formatSecretPath(path, key);
-    }
-    const found = findForbiddenSecretKey(child, [...path, key]);
-    if (found) {
-      return found;
-    }
-  }
-  return undefined;
-}
-
-function formatSecretPath(path: string[], key: string): string {
-  return path.length === 0 ? key : `${path.join('.')}.${key}`;
+function firstForbidden(candidates: Array<string | undefined>): string | undefined {
+  return candidates.find((item): item is string => item !== undefined);
 }
 
 function looksLikeEmbeddedSecret(url: string): boolean {
-  if (/[?&](access_token|api_key|token|password|secret)=/i.test(url)) {
-    return true;
-  }
-  if (/:\/\/[^/@]+:[^/@]+@/.test(url)) {
-    return true;
-  }
-  return false;
+  return (
+    /[?&](access_token|api_key|token|password|secret)=/i.test(url) ||
+    /:\/\/[^/@]+:[^/@]+@/.test(url)
+  );
 }

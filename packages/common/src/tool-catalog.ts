@@ -148,28 +148,18 @@ export function buildDelegateToBotTool(botIds: readonly string[]): DelegateToBot
   }
   const listed = ids.join(', ');
   return {
-    name: DELEGATE_TO_BOT,
+    ...DELEGATE_TO_BOT_TOOL,
     description: `Delegate work to another bot in this channel as a durable child Run. botId MUST be exactly one of: ${listed}. Never invent bot ids.`,
     parameters: {
-      type: 'object',
+      ...DELEGATE_TO_BOT_TOOL.parameters,
       properties: {
+        ...DELEGATE_TO_BOT_TOOL.parameters.properties,
         botId: {
           type: 'string',
           description: `Exact participant bot id: ${listed}`,
           enum: ids,
         },
-        objective: {
-          type: 'string',
-          description:
-            'What the child run should accomplish. For long collaboration relays, include "relay round N of M".',
-        },
-        requestedCapabilities: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Tool names the child may use; must be a subset of this run authority',
-        },
       },
-      required: ['botId', 'objective'],
     },
   };
 }

@@ -157,7 +157,12 @@ export { createMastraAgentCard, isA2AAgentCard } from './a2a-card.js';
 export { isMainModule } from './is-main.js';
 export { asRecord, asString, asStringArray } from './json-value.js';
 export type { ContractResult } from './contract-result.js';
-export { contractFail, contractOk, parseNonEmptyString } from './contract-result.js';
+export {
+  contractFail,
+  contractOk,
+  parseContractList,
+  parseNonEmptyString,
+} from './contract-result.js';
 export { parseHttpOrigin } from './http-origin.js';
 export type { IdentityKey } from './identity-key.js';
 export { identityKeyEquals, parseIdentityKey, serializeIdentityKey } from './identity-key.js';

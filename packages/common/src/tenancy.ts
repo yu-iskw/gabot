@@ -119,20 +119,21 @@ export type IdentityTeammate = {
   roleDescription?: string;
 };
 
+const DEFAULT_IDENTITY_TEAMMATES: readonly IdentityTeammate[] = TEAM_BOT_PROFILES.map((bot) => ({
+  id: bot.id,
+  title: bot.title,
+  roleDescription: bot.roleDescription,
+}));
+
 export function botIdentityContent(
   botId: string,
-  teammates: readonly IdentityTeammate[] = TEAM_BOT_PROFILES.map((bot) => ({
-    id: bot.id,
-    title: bot.title,
-    roleDescription: bot.roleDescription,
-  })),
+  teammates: readonly IdentityTeammate[] = DEFAULT_IDENTITY_TEAMMATES,
 ): string {
-  const profile = TEAM_BOT_PROFILES.find((bot) => bot.id === botId);
   const self = teammates.find((bot) => bot.id === botId);
   const role =
-    profile?.roleDescription ??
     self?.roleDescription ??
     self?.title ??
+    TEAM_BOT_PROFILES.find((bot) => bot.id === botId)?.roleDescription ??
     'Helps with governed coworker tasks.';
   const teammateList =
     teammates.length > 0
