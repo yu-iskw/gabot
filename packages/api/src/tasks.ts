@@ -12,18 +12,18 @@ import { isTurnClientError } from './turns.js';
 
 import type { AdmittedTask, GabotStore, SessionUser } from './store/types.js';
 
-export class TaskAdmitClientError extends Error {
+class TaskAdmitClientError extends Error {
   public constructor(message: string) {
     super(message);
     this.name = 'TaskAdmitClientError';
   }
 }
 
-export function isTaskAdmitClientError(error: unknown): boolean {
+function isTaskAdmitClientError(error: unknown): boolean {
   return error instanceof TaskAdmitClientError;
 }
 
-export function isTaskIdempotencyConflict(error: unknown): boolean {
+function isTaskIdempotencyConflict(error: unknown): boolean {
   return error instanceof TaskIdempotencyConflictError;
 }
 

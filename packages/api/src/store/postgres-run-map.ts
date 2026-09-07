@@ -81,9 +81,3 @@ export function toRunRecord(row: DbRun): RunRecord {
   };
 }
 
-export const RUN_RETURNING = `
-  id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
-  owner_user_id, trigger_type, status, objective, authority, depth, started_at,
-  finished_at, error, task_id
-`;
-
