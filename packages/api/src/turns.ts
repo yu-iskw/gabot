@@ -96,7 +96,7 @@ type ExecuteRunInput = TurnDeps & {
   runId: string;
 };
 
-export type TurnOutcome = 'busy' | 'executed' | 'lost' | 'terminal';
+type TurnOutcome = 'busy' | 'executed' | 'lost' | 'terminal';
 
 export type TurnResult = {
   outcome: TurnOutcome;
