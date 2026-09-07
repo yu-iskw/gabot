@@ -1,0 +1,13 @@
+# Squawk config for Atlas versioned migrations (ADR 0019).
+# Greenfield migrations are applied once under Atlas revisions; IF NOT EXISTS
+# and CREATE INDEX CONCURRENTLY are intentionally avoided (CONCURRENTLY cannot
+# run inside Atlas's default transaction).
+
+excluded_rules = [
+  "prefer-robust-stmts",
+  "require-concurrent-index-creation",
+  "require-concurrent-index-deletion",
+  "require-lock-timeout",
+  "require-statement-timeout",
+  "prefer-bigint-over-int",
+]

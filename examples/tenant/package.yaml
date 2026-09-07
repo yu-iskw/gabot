@@ -1,0 +1,11 @@
+agents:
+  - id: general-assistant
+    name: General Assistant
+    title: General Assistant
+skills:
+  - slug: brief
+    title: Brief
+    summary: Summarize in three bullets
+    instructions: Summarize the request in three bullets.
+brand:
+  name: gabot
