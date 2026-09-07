@@ -54,8 +54,17 @@ describe('jobs', () => {
   it('posts a durable run execute to the control plane', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', fetchMock);
-    await deliverRun({ key: 'run-1', payload: { runId: 'run-1' } }, 'http://api:3001', 'secret');
+    await deliverRun(
+      { key: 'run-1', payload: { runId: 'run-1' } },
+      'http://api:3001',
+      'secret',
+      'jobs-1',
+    );
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/internal/runs/execute');
+    const init = fetchMock.mock.calls[0]?.[1] as { body?: unknown } | undefined;
+    const body = JSON.parse(String(init?.body)) as { runId?: string; workerId?: string };
+    expect(body.runId).toBe('run-1');
+    expect(body.workerId).toBe('jobs-1');
     vi.unstubAllGlobals();
   });
 
@@ -67,7 +76,12 @@ describe('jobs', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     await expect(
-      deliverRun({ key: 'run-1', payload: { runId: 'run-1' } }, 'http://api:3001', 'secret'),
+      deliverRun(
+        { key: 'run-1', payload: { runId: 'run-1' } },
+        'http://api:3001',
+        'secret',
+        'jobs-1',
+      ),
     ).rejects.toThrow('run missing');
     vi.unstubAllGlobals();
   });

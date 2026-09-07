@@ -1,7 +1,7 @@
 import { assertDelegationBudget } from '@gabot/common';
 
 import { toRunRecord, type DbRun } from './postgres-run-map.js';
-import { DelegationBudgetError } from './types.js';
+import { DelegationBudgetError, RUN_EXECUTE_KIND } from './types.js';
 
 import type { DelegatedChildInput, RunRecord } from './types.js';
 import type postgres from 'postgres';
@@ -75,7 +75,7 @@ async function writeDelegatedChild(sql: TxSql, input: DelegatedChildInput): Prom
   await sql`
     INSERT INTO work_items (kind, key, run_at, payload)
     VALUES (
-      ${'run.execute'}, ${childId}, ${new Date()},
+      ${RUN_EXECUTE_KIND}, ${childId}, ${new Date()},
       ${JSON.stringify({ runId: childId })}::jsonb
     )
     ON CONFLICT (kind, key) DO NOTHING

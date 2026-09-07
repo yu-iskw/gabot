@@ -24,10 +24,18 @@ import {
   upsertCapabilityGrant,
 } from './postgres-connections.js';
 import { insertDelegatedChild } from './postgres-delegation.js';
+import {
+  acquireRun as acquireRunTx,
+  insertAdmittedRootRun,
+  renewRunLease as renewRunLeaseTx,
+  settleRun as settleRunTx,
+} from './postgres-run-lease.js';
 import { parseEnvelope, toRunRecord, type DbRun } from './postgres-run-map.js';
 import { PROTECTED_AGENT_ID, PROJECT_NOT_FOUND, WORKSPACE_NOT_FOUND } from './types.js';
 
 import type {
+  AcquireRunInput,
+  AdmittedRun,
   AgentPatch,
   AgentProfile,
   AuditListScope,
@@ -49,12 +57,17 @@ import type {
   PluginRecord,
   PluginTool,
   ProjectRecord,
+  RenewRunLeaseInput,
+  RootRunAdmission,
   RoutineListItem,
   RoutinePatch,
   RoutineRecord,
+  RunAcquisition,
+  RunLease,
   RunRecord,
   RunStatus,
   SessionUser,
+  SettleRunInput,
   SkillRecord,
   WorkRecord,
   WorkspaceRecord,
@@ -1116,6 +1129,22 @@ export class PostgresStore implements GabotStore {
       requestedCapabilities: asStringArray(row.requested_capabilities),
       authorityEnvelope: parseEnvelope(row.authority_envelope),
     }));
+  }
+
+  public async admitRootRun(input: RootRunAdmission): Promise<AdmittedRun> {
+    return insertAdmittedRootRun(this.sql, input);
+  }
+
+  public async acquireRun(input: AcquireRunInput): Promise<RunAcquisition> {
+    return acquireRunTx(this.sql, input);
+  }
+
+  public async renewRunLease(input: RenewRunLeaseInput): Promise<RunLease | null> {
+    return renewRunLeaseTx(this.sql, input);
+  }
+
+  public async settleRun(input: SettleRunInput): Promise<RunRecord | null> {
+    return settleRunTx(this.sql, input);
   }
 
   private async maybeBootstrapAdmin(

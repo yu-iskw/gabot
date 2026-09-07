@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   botIdentityContent,
   collectText,
@@ -17,6 +19,24 @@ import { PROTECTED_AGENT_ID } from './store/types.js';
 
 import type { GabotStore, RunRecord, RunTriggerType, SessionUser } from './store/types.js';
 import type { AguiRunInput, AguiToolCall, ModelPort } from '@gabot/common';
+
+let cachedExecutorId: string | undefined;
+
+export function processExecutorId(): string {
+  cachedExecutorId ??= `api-${randomUUID()}`;
+  return cachedExecutorId;
+}
+
+export class RunFencedError extends Error {
+  public constructor(runId: string) {
+    super(`Run ${runId} is no longer owned by this executor.`);
+    this.name = 'RunFencedError';
+  }
+}
+
+export function isRunFenced(error: unknown): error is RunFencedError {
+  return error instanceof RunFencedError;
+}
 
 type AgentRunInput = AguiRunInput & { botId?: string };
 
@@ -56,6 +76,7 @@ export function createHttpAgentRunner(agentUrl: string): AgentRunner {
 
 type TurnDeps = {
   agent: AgentRunner;
+  executorId?: string;
   mcpUrl: string;
   store: GabotStore;
   user: SessionUser;
@@ -65,7 +86,7 @@ type TurnInput = TurnDeps & {
   botId?: string;
   channelId: string;
   message: string;
-  triggerType: RunTriggerType;
+  triggerType: Exclude<RunTriggerType, 'delegation'>;
 };
 
 type ExecuteRunInput = TurnDeps & {
@@ -73,7 +94,10 @@ type ExecuteRunInput = TurnDeps & {
   runId: string;
 };
 
+export type TurnOutcome = 'busy' | 'executed' | 'lost' | 'terminal';
+
 export type TurnResult = {
+  outcome: TurnOutcome;
   runId: string;
   text: string;
   toolNames: string[];
@@ -131,77 +155,100 @@ export async function executeTurn(input: TurnInput): Promise<TurnResult> {
       'Active workspace membership is required to start a run on this channel.',
     );
   }
-  const run = await input.store.createRun({
+  const executorId = input.executorId ?? processExecutorId();
+  const admitted = await input.store.admitRootRun({
     workspaceId: scope.workspaceId,
     projectId: scope.projectId,
     channelId: input.channelId,
     botId,
     ownerUserId: input.user.id,
     triggerType: input.triggerType,
-    status: 'queued',
-    objective: input.message,
+    message: input.message,
     authority: rootAuthority(TURN_TOOL_NAMES),
-    depth: 0,
-  });
-  await input.store.appendMessage({
-    channelId: input.channelId,
-    role: 'user',
-    content: input.message,
-  });
-  await recordRunEvent(input.store, {
-    run,
-    type: 'message.user',
-    actorType: 'user',
-    actorId: input.user.id,
-    payload: { message: input.message },
-  });
-  await recordRunEvent(input.store, {
-    run,
-    type: 'run.started',
-    actorType: 'bot',
-    actorId: botId,
-    payload: { trigger: input.triggerType },
+    executorId,
   });
   return executeRun({
     store: input.store,
     agent: input.agent,
     mcpUrl: input.mcpUrl,
     user: input.user,
-    runId: run.id,
-    run,
+    executorId,
+    run: admitted.run,
+    runId: admitted.run.id,
   });
 }
 
+const TERMINAL_RUN_STATUSES = new Set<RunRecord['status']>(['succeeded', 'cancelled', 'failed']);
+
 export async function executeRun(input: ExecuteRunInput): Promise<TurnResult> {
-  const run = input.run ?? (await input.store.getRun(input.runId));
-  if (!run) {
+  const executorId = input.executorId ?? processExecutorId();
+  const preview = input.run ?? (await input.store.getRun(input.runId));
+  if (!preview) {
     throw new Error(`Run ${input.runId} not found.`);
   }
-  if (run.status === 'succeeded' || run.status === 'cancelled' || run.status === 'failed') {
-    return { runId: run.id, text: '', toolNames: [] };
+  if (TERMINAL_RUN_STATUSES.has(preview.status)) {
+    return { outcome: 'terminal', runId: preview.id, text: '', toolNames: [] };
   }
   const membership = await input.store.getMembership(input.user.id);
-  if (!membershipCoversWorkspace(membership, run.workspaceId)) {
+  if (!membershipCoversWorkspace(membership, preview.workspaceId)) {
     throw new TurnClientError('Active workspace membership is required to execute this run.');
   }
-  await input.store.updateRunStatus(run.id, 'running');
+  const acquired = await input.store.acquireRun({ runId: preview.id, executorId });
+  if (acquired.outcome === 'missing') {
+    throw new Error(`Run ${input.runId} not found.`);
+  }
+  if (acquired.outcome !== 'started') {
+    return { outcome: acquired.outcome, runId: preview.id, text: '', toolNames: [] };
+  }
+  return runToCompletion(input, acquired.run, executorId);
+}
+
+async function runToCompletion(
+  input: TurnDeps,
+  run: RunRecord,
+  executorId: string,
+): Promise<TurnResult> {
   try {
-    return await completeRun(input, run);
+    return await completeRun(input, run, executorId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'run failed';
-    await input.store.updateRunStatus(run.id, 'failed', message);
-    await recordRunEvent(input.store, {
-      run,
-      type: run.parentRunId ? 'agent.delegation.failed' : 'run.failed',
-      actorType: 'bot',
-      actorId: run.botId,
-      payload: { error: message },
-    });
+    if (isRunFenced(error)) {
+      throw error;
+    }
+    await settleFailedRun(input.store, run, executorId, error);
     throw error;
   }
 }
 
-async function completeRun(input: TurnDeps, run: RunRecord): Promise<TurnResult> {
+async function settleFailedRun(
+  store: GabotStore,
+  run: RunRecord,
+  executorId: string,
+  error: unknown,
+): Promise<void> {
+  const message = error instanceof Error ? error.message : 'run failed';
+  const settled = await store.settleRun({
+    runId: run.id,
+    executorId,
+    status: 'failed',
+    error: message,
+  });
+  if (!settled) {
+    return;
+  }
+  await recordRunEvent(store, {
+    run,
+    type: run.parentRunId ? 'agent.delegation.failed' : 'run.failed',
+    actorType: 'bot',
+    actorId: run.botId,
+    payload: { error: message },
+  });
+}
+
+async function completeRun(
+  input: TurnDeps,
+  run: RunRecord,
+  executorId: string,
+): Promise<TurnResult> {
   const [threadId, seeded] = await Promise.all([
     input.store.mintThread(run.ownerUserId, run.channelId),
     messagesForRun(input.store, run),
@@ -210,6 +257,7 @@ async function completeRun(input: TurnDeps, run: RunRecord): Promise<TurnResult>
   let text = '';
   let current = seeded;
   for (let step = 0; step < 4; step += 1) {
+    await assertHeld(input.store, run, executorId);
     const events = await input.agent.run({
       threadId,
       runId: run.id,
@@ -225,7 +273,7 @@ async function completeRun(input: TurnDeps, run: RunRecord): Promise<TurnResult>
     if (calls.length === 0) {
       break;
     }
-    current = await applyToolCalls(input, run, current, calls, toolNames);
+    current = await applyToolCalls({ input, run, messages: current, calls, toolNames, executorId });
   }
   if (text) {
     await input.store.appendMessage({
@@ -235,7 +283,14 @@ async function completeRun(input: TurnDeps, run: RunRecord): Promise<TurnResult>
       agentId: run.botId,
     });
   }
-  await input.store.updateRunStatus(run.id, 'succeeded');
+  const settled = await input.store.settleRun({
+    runId: run.id,
+    executorId,
+    status: 'succeeded',
+  });
+  if (!settled) {
+    throw new RunFencedError(run.id);
+  }
   await recordRunEvent(input.store, {
     run,
     type: 'run.succeeded',
@@ -251,7 +306,14 @@ async function completeRun(input: TurnDeps, run: RunRecord): Promise<TurnResult>
       payload: { parentRunId: run.parentRunId },
     });
   }
-  return { runId: run.id, text, toolNames };
+  return { outcome: 'executed', runId: run.id, text, toolNames };
+}
+
+async function assertHeld(store: GabotStore, run: RunRecord, executorId: string): Promise<void> {
+  const lease = await store.renewRunLease({ runId: run.id, executorId });
+  if (!lease) {
+    throw new RunFencedError(run.id);
+  }
 }
 
 async function messagesForRun(
@@ -272,13 +334,15 @@ async function messagesForRun(
   ];
 }
 
-async function applyToolCalls(
-  input: TurnDeps,
-  run: RunRecord,
-  messages: AguiRunInput['messages'],
-  calls: AguiToolCall[],
-  toolNames: string[],
-): Promise<AguiRunInput['messages']> {
+async function applyToolCalls(options: {
+  calls: AguiToolCall[];
+  executorId: string;
+  input: TurnDeps;
+  messages: AguiRunInput['messages'];
+  run: RunRecord;
+  toolNames: string[];
+}): Promise<AguiRunInput['messages']> {
+  const { input, run, messages, calls, toolNames, executorId } = options;
   let next = [...messages];
   for (const call of calls) {
     toolNames.push(call.name);
@@ -289,6 +353,7 @@ async function applyToolCalls(
       actorId: run.botId,
       payload: { tool: call.name },
     });
+    await assertHeld(input.store, run, executorId);
     const result = await runGatewayAction({
       store: input.store,
       mcpUrl: input.mcpUrl,

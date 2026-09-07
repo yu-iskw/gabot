@@ -135,9 +135,10 @@ export async function deliverRun(
   item: { key: string; payload: Record<string, unknown> },
   apiUrl: string,
   secret: string,
+  workerId: string,
 ): Promise<void> {
   const runId = typeof item.payload.runId === 'string' ? item.payload.runId : item.key;
-  await postInternal(apiUrl, '/api/internal/runs/execute', secret, { runId });
+  await postInternal(apiUrl, '/api/internal/runs/execute', secret, { runId, workerId });
 }
 
 async function postInternal(
@@ -175,7 +176,7 @@ type WorkItem = { kind: string; key: string; payload: Record<string, unknown> };
 
 async function handleItem(
   item: WorkItem,
-  input: { sql: JobSql; apiUrl: string; secret: string },
+  input: { sql: JobSql; apiUrl: string; secret: string; workerId: string },
 ): Promise<void> {
   try {
     switch (item.kind) {
@@ -188,7 +189,7 @@ async function handleItem(
         break;
       }
       case 'run.execute': {
-        await deliverRun(item, input.apiUrl, input.secret);
+        await deliverRun(item, input.apiUrl, input.secret, input.workerId);
         break;
       }
       default: {
