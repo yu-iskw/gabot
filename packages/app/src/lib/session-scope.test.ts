@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   parseSessionMe,
+  sessionCanManageCatalog,
   sessionMembershipLabel,
   sessionOrigin,
   sessionQueryKey,
@@ -52,6 +53,15 @@ describe('sessionOrigin', () => {
   it('falls back for relative or empty API bases', () => {
     expect(sessionOrigin('', 'https://app.example')).toBe('https://app.example');
     expect(sessionOrigin('/api', 'https://app.example')).toBe('https://app.example');
+  });
+});
+
+describe('sessionCanManageCatalog', () => {
+  it('allows only an admin role', () => {
+    expect(sessionCanManageCatalog({ role: 'admin' })).toBe(true);
+    expect(sessionCanManageCatalog({ role: 'member' })).toBe(false);
+    expect(sessionCanManageCatalog({ role: 'auditor' })).toBe(false);
+    expect(sessionCanManageCatalog({ role: null })).toBe(false);
   });
 });
 

@@ -10,12 +10,14 @@ import { Input } from '../components/ui/input.js';
 import { Textarea } from '../components/ui/textarea.js';
 import { useAuth } from '../lib/auth-context.js';
 import { useSession } from '../lib/session-context.js';
+import { sessionCanManageCatalog } from '../lib/session-scope.js';
 
 import type { Coworker } from '../lib/agents.js';
 
 export function AgentsPage() {
   const { token } = useAuth();
-  const { queryKey } = useSession();
+  const { me, queryKey } = useSession();
+  const canManageCatalog = sessionCanManageCatalog(me);
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -51,12 +53,16 @@ export function AgentsPage() {
       title="Agents"
       description="Coworkers you can talk to, including ones a bot created."
       action={
-        <Button onClick={() => setOpen(true)} data-testid="new-agent" variant="ghost" size="sm">
-          New agent
-        </Button>
+        canManageCatalog ? (
+          <Button onClick={() => setOpen(true)} data-testid="new-agent" variant="ghost" size="sm">
+            New agent
+          </Button>
+        ) : undefined
       }
     >
-      {open ? <CreateAgentForm onCreate={(input) => create.mutate(input)} /> : null}
+      {open && canManageCatalog ? (
+        <CreateAgentForm onCreate={(input) => create.mutate(input)} />
+      ) : null}
       <PageSection title="Your agents">
         {(agents.data ?? []).length === 0 ? (
           <PageEmpty>No agents yet.</PageEmpty>

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { apiJson } from '../../api.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { useSession } from '../../lib/session-context.js';
+import { sessionCanManageCatalog } from '../../lib/session-scope.js';
 import { ChannelAvatar } from '../channels/channel-avatar.js';
 import { Button } from '../ui/button.js';
 import { Input } from '../ui/input.js';
@@ -16,7 +17,8 @@ const PROTECTED_AGENT_ID = 'general-assistant';
 
 export function AgentProfile({ agentId, onDeleted }: { agentId: string; onDeleted?: () => void }) {
   const { token } = useAuth();
-  const { queryKey } = useSession();
+  const { me, queryKey } = useSession();
+  const canManageCatalog = sessionCanManageCatalog(me);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -78,9 +80,9 @@ export function AgentProfile({ agentId, onDeleted }: { agentId: string; onDelete
 
   const profile = agent.data;
   const visibility = profile.visibility === 'private' ? 'Private' : 'Public';
-  const canDelete = profile.id !== PROTECTED_AGENT_ID;
+  const canDelete = canManageCatalog && profile.id !== PROTECTED_AGENT_ID;
 
-  if (editing) {
+  if (editing && canManageCatalog) {
     return (
       <EditAgentForm
         agent={profile}
@@ -113,14 +115,16 @@ export function AgentProfile({ agentId, onDeleted }: { agentId: string; onDelete
         <Button className="w-full" disabled={start.isPending} onClick={() => start.mutate(profile)}>
           Start new channel
         </Button>
-        <Button
-          className="w-full"
-          data-testid="edit-agent"
-          variant="outline"
-          onClick={() => setEditing(true)}
-        >
-          Edit
-        </Button>
+        {canManageCatalog ? (
+          <Button
+            className="w-full"
+            data-testid="edit-agent"
+            variant="outline"
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </Button>
+        ) : null}
         {canDelete ? (
           <Button
             className="w-full"
