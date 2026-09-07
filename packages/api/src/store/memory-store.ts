@@ -883,6 +883,7 @@ export class MemoryStore implements GabotStore {
     if (work && (work.claimedBy !== input.executorId || work.finishedAt !== null)) {
       return null;
     }
+    this.appendSettledAssistant(run, input, now);
     run.status = input.status;
     run.error = input.error ?? null;
     run.finishedAt = now;
@@ -1027,6 +1028,24 @@ export class MemoryStore implements GabotStore {
 
   public addRoutine(routine: RoutineRow): void {
     this.routines.push(routine);
+  }
+
+  private appendSettledAssistant(run: RunRecord, input: SettleRunInput, now: Date): void {
+    if (input.status !== 'succeeded' || !input.assistantContent) {
+      return;
+    }
+    this.messages.push({
+      id: randomUUID(),
+      channelId: run.channelId,
+      role: 'assistant',
+      content: input.assistantContent,
+      agentId: run.botId,
+      createdAt: now,
+    });
+    const channel = this.channels.get(run.channelId);
+    if (channel) {
+      channel.lastMessage = input.assistantContent;
+    }
   }
 
   private executeWork(runId: string): WorkRow | undefined {

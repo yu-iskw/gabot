@@ -289,6 +289,10 @@ describe('control plane', () => {
     expect(result.outcome).toBe('executed');
     expect(result.toolNames).toEqual([]);
     expect(result.text.toLowerCase()).toContain('gabot');
+    const messages = await store.listMessages(defaultChannel);
+    expect(messages.some((row) => row.role === 'assistant' && row.content === result.text)).toBe(
+      true,
+    );
     expect(await store.claimWork('jobs', 10)).toHaveLength(0);
   });
 

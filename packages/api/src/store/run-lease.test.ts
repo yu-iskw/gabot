@@ -131,16 +131,22 @@ describe('root run lease', () => {
         runId: admitted.run.id,
         executorId: 'jobs',
         status: 'succeeded',
+        assistantContent: 'ghost',
         now,
       }),
     ).toBeNull();
+    expect(await store.listMessages(defaultChannel)).toHaveLength(1);
     const settled = await store.settleRun({
       runId: admitted.run.id,
       executorId: 'http-1',
       status: 'succeeded',
+      assistantContent: 'done',
       now,
     });
     expect(settled?.status).toBe('succeeded');
     expect((await store.getRun(admitted.run.id))?.status).toBe('succeeded');
+    const messages = await store.listMessages(defaultChannel);
+    expect(messages.at(-1)?.role).toBe('assistant');
+    expect(messages.at(-1)?.content).toBe('done');
   });
 });

@@ -300,6 +300,7 @@ export type RenewRunLeaseInput = {
 };
 
 export type SettleRunInput = {
+  assistantContent?: string;
   error?: string;
   executorId: string;
   now?: Date;

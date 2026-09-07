@@ -157,6 +157,28 @@ async function insertClaimedExecuteWork(
   `;
 }
 
+async function insertSettledAssistant(
+  sql: TxSql,
+  runRow: DbRun,
+  input: SettleRunInput,
+): Promise<void> {
+  if (input.status !== 'succeeded' || !input.assistantContent) {
+    return;
+  }
+  const messageId = crypto.randomUUID();
+  await sql`
+    INSERT INTO messages (id, channel_id, role, content, agent_id)
+    VALUES (
+      ${messageId}, ${runRow.channel_id}, ${'assistant'}, ${input.assistantContent},
+      ${runRow.bot_id}
+    )
+  `;
+  await sql`
+    UPDATE channels SET last_message = ${input.assistantContent}, last_message_at = now(), updated_at = now()
+    WHERE id = ${runRow.channel_id}
+  `;
+}
+
 async function lockRunRow(sql: TxSql, runId: string): Promise<DbRun | undefined> {
   const rows = await sql<DbRun[]>`
     SELECT id, workspace_id, project_id, channel_id, parent_run_id, root_run_id, bot_id,
@@ -279,6 +301,8 @@ async function performSettleRun(sql: TxSql, input: SettleRunInput): Promise<RunR
   if (work && (work.claimed_by !== input.executorId || work.finished_at !== null)) {
     return null;
   }
+
+  await insertSettledAssistant(sql, runRow, input);
 
   const updatedRows = await sql<DbRun[]>`
     UPDATE runs

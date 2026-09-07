@@ -264,18 +264,11 @@ async function completeRun(input: HeldTurn, run: RunRecord): Promise<TurnResult>
     }
     current = await applyToolCalls({ input, run, messages: current, calls, toolNames });
   }
-  if (text) {
-    await input.store.appendMessage({
-      channelId: run.channelId,
-      role: 'assistant',
-      content: text,
-      agentId: run.botId,
-    });
-  }
   const settled = await input.store.settleRun({
     runId: run.id,
     executorId: input.executorId,
     status: 'succeeded',
+    assistantContent: text || undefined,
   });
   if (!settled) {
     throw new RunFencedError(run.id);
