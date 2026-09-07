@@ -768,6 +768,7 @@ describe('turns and runs', () => {
       objective: 'already in flight',
       authority: rootAuthority(['delegate_to_bot']),
       depth: 1,
+      parentRunId: 'parent-run',
     });
     const result = await executeRun({
       store,
